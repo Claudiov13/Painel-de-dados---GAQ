@@ -1,0 +1,30 @@
+Como subir o servidor sem instalar Node.js no Windows
+
+1. Baixe a versao ZIP do Node.js para Windows x64.
+   Arquivo esperado: algo como node-vXX.XX.X-win-x64.zip
+
+2. Extraia o ZIP dentro desta pasta do projeto em uma destas opcoes:
+   - node-portable
+   - nodejs
+   - tools\node
+
+3. No final, este arquivo precisa existir:
+   - node-portable\node.exe
+   ou
+   - nodejs\node.exe
+   ou
+   - tools\node\node.exe
+
+4. Para iniciar o servidor manualmente:
+   powershell -ExecutionPolicy Bypass -File ".\iniciar_servidor.ps1"
+
+5. Para configurar o Windows para iniciar no boot:
+   powershell -ExecutionPolicy Bypass -File ".\configurar_servidor_windows.ps1"
+
+6. O servidor Express usa:
+   - server.js
+   - porta 3000
+
+7. Logs:
+   - logs\server-out.log
+   - logs\server-err.log

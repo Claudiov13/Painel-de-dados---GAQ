@@ -1,0 +1,23 @@
+# Dependencias e artefactos locais
+node_modules/
+node-portable/
+logs/
+.claude/
+.vscode/
+
+# Dados sensiveis e gerados localmente
+dados.js
+tags.js
+**/dados.json
+**/tags.json
+
+# Backups e pacotes locais
+Versões anteriores/
+*.zip
+
+# Logs temporarios
+*.log
+tmp-server-*.log
+
+# Ficheiros do Windows
+desktop.ini
