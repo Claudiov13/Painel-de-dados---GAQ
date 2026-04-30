@@ -1,12 +1,16 @@
 # Painel de dados - GAQ
 
-Solução local do painel de acompanhamento da GAQ.
+Solucao local do painel de acompanhamento da GAQ.
 
-## Repositório público
+## Historico de alteracoes
 
-Este repositório guarda apenas o código e a configuração da solução.
+Consulte [CHANGELOG.md](./CHANGELOG.md) para os registos das ultimas evolucoes da interface e das regras de negocio.
 
-Os ficheiros de dados reais não são versionados aqui:
+## Repositorio publico
+
+Este repositorio guarda apenas o codigo e a configuracao da solucao.
+
+Os ficheiros de dados reais nao sao versionados aqui:
 
 - `dados.js`
 - `tags.js`

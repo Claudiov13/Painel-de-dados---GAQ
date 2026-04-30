@@ -2441,11 +2441,33 @@ const topModLentas = (() => {
       ? calcAreaSlaScore(rows, phaseIntervals).score
       : 0);
 
+    const subareaStatusDefs = [
+      { key: "critico", label: "Crítico", color: "#d35400" },
+      { key: "atencao", label: "Em atenção", color: "#ff9500" },
+      { key: "sla_vencido", label: "SLA vencido", color: "#ff3b30" },
+      { key: "no_prazo", label: "No prazo", color: "#34c759" },
+    ];
     const subareas = [
       { key: "NCL", label: "NCL · Núcleo de Compras", color: "var(--gaq-ncl)", rows: fBack.filter(r => r.faseSubarea === "NCL") },
       { key: "CPL", label: "CPL · Comissão de Licitação", color: "var(--gaq-cpl)", rows: fBack.filter(r => r.faseSubarea === "CPL") },
       { key: "Scont", label: "Scont · Contratos", color: "var(--gaq-rsp)", rows: fBack.filter(r => r.faseSubarea === "Scont") },
-    ].map(item => ({ ...item, pct: fBack.length ? Math.round((item.rows.length / fBack.length) * 100) : 0 }));
+    ].map(item => {
+      const classifiedRows = classificadosOverview.filter(r => r.faseSubarea === item.key);
+      const statusSegments = subareaStatusDefs.map(def => {
+        const rows = classifiedRows.filter(r => r._sla.bucket === def.key);
+        return {
+          ...def,
+          rows,
+          count: rows.length,
+          pct: item.rows.length ? Math.round((rows.length / item.rows.length) * 100) : 0,
+        };
+      });
+      return {
+        ...item,
+        pct: fBack.length ? Math.round((item.rows.length / fBack.length) * 100) : 0,
+        statusSegments,
+      };
+    });
 
     const recentActivity = [...fBase]
       .filter(r => r.ultimaData)
@@ -2654,6 +2676,16 @@ const topModLentas = (() => {
     if (!base.length) return null;
 
     const rowKey = (r) => r ? (r.ProcessKey || `${r.NumRC || ""}|${r.TicketSD || ""}|${r.Objeto || ""}`) : "";
+    const modColorsExec = {
+      "pregao": "#1a5276",
+      "concorrencia": "#6c3483",
+      "dispensa": "#e67e22",
+      "inexigibilidade": "#c0392b",
+      "adesao": "#16a085",
+      "credenciamento": "#2e86c1",
+      "dialogo": "#8e44ad",
+      "n/i": "#8e8e93",
+    };
     const uniqRows = (rows) => {
       const seen = new Set();
       return rows.filter(r => {
@@ -2742,9 +2774,6 @@ const topModLentas = (() => {
       )
       .slice(0, 5);
 
-    const feedKeys = new Set(fBase.map(rowKey));
-    const scopedBaseDiffFeed = baseDiffFeed.filter(change => change.proc && feedKeys.has(rowKey(change.proc)));
-
     const problemByMod = modalidadesAtivas
       .map(m => ({ ...m, sobPressao: problematicosRows.filter(r => nrm(r.Modalidade) === nrm(m.label)).length }))
       .sort((a, b) => b.sobPressao - a.sobPressao || b.count - a.count);
@@ -2760,6 +2789,36 @@ const topModLentas = (() => {
     const buyerRanking = Object.values(buyerMap)
       .map(b => ({ ...b, mediaDU: b.count > 0 ? Math.round(b.totalDias / b.count) : 0 }))
       .sort((a, b) => b.demandas - a.demandas)
+      .slice(0, 10);
+
+    const buyerHistoryMap = {};
+    const concludedModTotals = {};
+    fBase.filter(r => r.isConcluded && (r.Comprador || r.Avaliador || r.Pregoeiro || r.respNCL)).forEach(r => {
+      const nome = r.Comprador || r.Avaliador || r.Pregoeiro || r.respNCL;
+      const mod = r.Modalidade || "N/I";
+      concludedModTotals[mod] = (concludedModTotals[mod] || 0) + 1;
+      if (!buyerHistoryMap[nome]) buyerHistoryMap[nome] = { nome, concluidos: 0, totalDias: 0, count: 0, rows: [], mods: {} };
+      buyerHistoryMap[nome].concluidos++;
+      buyerHistoryMap[nome].rows.push(r);
+      buyerHistoryMap[nome].mods[mod] = (buyerHistoryMap[nome].mods[mod] || 0) + 1;
+      if (r.diasTotais > 0) {
+        buyerHistoryMap[nome].totalDias += r.diasTotais;
+        buyerHistoryMap[nome].count++;
+      }
+    });
+    const buyerRankingConcluded = Object.values(buyerHistoryMap)
+      .map(b => {
+        const modParts = Object.entries(b.mods || {})
+          .map(([label, count]) => {
+            const pctBuyer = b.concluidos ? Math.round((count / b.concluidos) * 100) : 0;
+            const pctTotal = concludedModTotals[label] ? Math.round((count / concludedModTotals[label]) * 100) : 0;
+            const color = modColorsExec[nrm(label)] || "#8e8e93";
+            return { label, count, pctBuyer, pctTotal, color };
+          })
+          .sort((a, bPart) => bPart.count - a.count || a.label.localeCompare(bPart.label));
+        return { ...b, mediaDU: b.count > 0 ? Math.round(b.totalDias / b.count) : 0, modParts };
+      })
+      .sort((a, b) => b.concluidos - a.concluidos || a.mediaDU - b.mediaDU || a.nome.localeCompare(b.nome))
       .slice(0, 10);
 
     const insights = [];
@@ -2799,6 +2858,11 @@ const topModLentas = (() => {
     return {
       total: fBase.length,
       ativos: fBack.length,
+      abertos: fBase.length,
+      concluidos: fBase.filter(r => r.isConcluded).length,
+      emAndamento: fBack.length,
+      cancelados: fBase.filter(r => r.isCanceled).length,
+      fracassados: fBase.filter(r => r.isFailed).length,
       classificados,
       criticos: criticoRows,
       atencao: atencaoRows,
@@ -2816,11 +2880,10 @@ const topModLentas = (() => {
       topCriticos,
       insights,
       buyerRanking,
+      buyerRankingConcluded,
       atrasadosSla: slaVencidoRows,
-      baseDiffFeed: scopedBaseDiffFeed,
-      baseDiffInfo,
     };
-  }, [base, fBase, fBack, baseDiffFeed, baseDiffInfo, phaseIntervals]);
+  }, [base, fBase, fBack, phaseIntervals]);
 
   const allProcesses = useMemo(() => {
     let arr = [...fBase];
@@ -3154,7 +3217,7 @@ const topModLentas = (() => {
       </aside>
 
       {/* ── MAIN CONTENT AREA ────────────────────────────────────────── */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, height: "100vh", overflow: "hidden" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: "100vh" }}>
 
         {/* ── TOP BAR ── */}
         <header className="pres-hide" style={{
@@ -3315,7 +3378,7 @@ const topModLentas = (() => {
         )}
 
         {/* ── SCROLLABLE CONTENT ── */}
-        <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
+        <div style={{ flex: 1, minHeight: 0, padding: "24px 24px 36px" }}>
 
         {/* ════════════ ABA: DIRETORIA HOME ════════════ */}
         {aba === "dirHome" && isDiretor && base.length > 0 && (() => {
@@ -4479,6 +4542,63 @@ const topModLentas = (() => {
                       </div>
                     ))}
 
+                    <div style={{ marginTop: 22, paddingTop: 16, borderTop: "1px solid var(--gaq-line)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap", marginBottom: 12 }}>
+                        <div>
+                          <div className="gaq-eyebrow" style={{ fontSize: 10, marginBottom: 4 }}>Régua SLA e entrega (%)</div>
+                          <div className="gaq-meta">Percentual dos processos em andamento por subárea em cada situação da régua global.</div>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+                        {[
+                          { label: "Crítico", color: "#d35400" },
+                          { label: "Em atenção", color: "#ff9500" },
+                          { label: "SLA vencido", color: "#ff3b30" },
+                          { label: "No prazo", color: "#34c759" },
+                        ].map(legend => (
+                          <span key={legend.label} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999, background: `${legend.color}12`, color: legend.color, fontSize: 11, fontWeight: 600 }}>
+                            <span className="gaq-dot" style={{ background: legend.color, width: 7, height: 7 }} />
+                            {legend.label}
+                          </span>
+                        ))}
+                      </div>
+                      <div style={{ display: "grid", gap: 14 }}>
+                        {overviewAdmin.subareas.map(item => (
+                          <div key={`mix-${item.key}`}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--gaq-text)" }}>{item.label}</span>
+                              <span className="gaq-meta gaq-num">{item.rows.length.toLocaleString("pt-BR")} proc.</span>
+                            </div>
+                            <div style={{ height: 12, display: "flex", borderRadius: 999, overflow: "hidden", background: "rgba(0,0,0,0.05)", border: "1px solid var(--gaq-line)" }}>
+                              {item.statusSegments.map(seg => (
+                                seg.pct > 0
+                                  ? <button
+                                      key={`${item.key}-${seg.key}`}
+                                      onClick={() => setDrillDown({ title: `${item.label} — ${seg.label}`, data: seg.rows, color: seg.color })}
+                                      title={`${seg.label}: ${seg.count} processo(s) · ${seg.pct}%`}
+                                      style={{ width: `${seg.pct}%`, minWidth: seg.count > 0 ? 10 : 0, border: "none", background: seg.color, padding: 0, cursor: "pointer" }}
+                                    />
+                                  : <React.Fragment key={`${item.key}-${seg.key}`} />
+                              ))}
+                            </div>
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, marginTop: 8 }}>
+                              {item.statusSegments.map(seg => (
+                                <button
+                                  key={`${item.key}-${seg.key}-meta`}
+                                  onClick={() => setDrillDown({ title: `${item.label} — ${seg.label}`, data: seg.rows, color: seg.color })}
+                                  disabled={seg.count === 0}
+                                  style={{ textAlign: "left", border: `1px solid ${seg.count ? `${seg.color}33` : "var(--gaq-line)"}`, background: seg.count ? `${seg.color}10` : "var(--gaq-bg-2)", color: seg.count ? seg.color : "var(--gaq-text-3)", borderRadius: 12, padding: "8px 10px", cursor: seg.count ? "pointer" : "default", opacity: seg.count ? 1 : 0.72 }}>
+                                  <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>{seg.label}</div>
+                                  <div className="gaq-num" style={{ fontSize: 16, fontWeight: 800 }}>{seg.pct}%</div>
+                                  <div style={{ fontSize: 10, marginTop: 2 }}>{seg.count} proc.</div>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
                     <div style={{ marginTop: 22, paddingTop: 16, borderTop: "1px solid var(--gaq-line)", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 18 }}>
                       {[
                         { label: "Tempo médio NCL", value: `${overviewAdmin.mediaNCL} d.u.`, color: "var(--gaq-ncl)", rows: overviewAdmin.subareas.find(x => x.key === "NCL")?.rows || [] },
@@ -4585,9 +4705,10 @@ const topModLentas = (() => {
               </>}
               {/* ── Visão da Área (perfil área bloqueado) ── */}
               {loginArea && areaAnoData.length > 0 && (() => {
-                const totalAnd = fBack.filter(r => r.emA).length;
+                const areaActiveRows = fBack.filter(r => r.emA);
+                const totalAnd = areaActiveRows.length;
                 const totalConc = fBack.filter(r => !r.emA).length;
-                const criticos = fBack.filter(r => r.emA && r.diasTotais > 50).length;
+                const criticos = areaActiveRows.filter(r => calcSLAClassification(r, phaseIntervals)?.bucket === "critico").length;
                 const mediaGeral = fBack.filter(r => !r.emA && r.diasTotais > 0).length
                   ? Math.round(fBack.filter(r => !r.emA && r.diasTotais > 0).reduce((s,r) => s + r.diasTotais, 0) / fBack.filter(r => !r.emA && r.diasTotais > 0).length)
                   : null;
@@ -4613,7 +4734,7 @@ const topModLentas = (() => {
                       {[
                         { label: "Em andamento", val: totalAnd, icon: "▶", color: "#2e86c1" },
                         { label: "Concluídos (total)", val: totalConc, icon: "✓", color: "#27ae60" },
-                        { label: "Críticos (>50 d.u.)", val: criticos, icon: "⚠", color: "#c0392b" },
+                        { label: "Críticos SLA + entrega", val: criticos, icon: "⚠", color: "#c0392b" },
                         { label: "Média d.u. (concluídos)", val: mediaGeral !== null ? mediaGeral + " d.u." : "—", icon: "⏱", color: "#8e44ad" },
                       ].map(k => (
                         <div key={k.label} style={{ background: "var(--card)", borderRadius: 10, padding: "14px 16px", boxShadow: "var(--shadow)", borderTop: `3px solid ${k.color}`, textAlign: "center" }}>
@@ -4838,6 +4959,32 @@ const topModLentas = (() => {
             </div>
           </div>
 
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, marginBottom: 18 }}>
+            {[
+              { label: "Processos abertos", value: executiveStrategic.abertos, color: "#1f6feb", bg: "linear-gradient(180deg, #f3f8ff 0%, #ffffff 100%)", border: "#d7e7ff", data: fBase, title: "Executivo — Processos abertos" },
+              { label: "Concluídos", value: executiveStrategic.concluidos, color: "#16a34a", bg: "linear-gradient(180deg, #f1fcf5 0%, #ffffff 100%)", border: "#d8f5e2", data: fBase.filter(r => r.isConcluded), title: "Executivo — Processos concluídos" },
+              { label: "Em andamento", value: executiveStrategic.emAndamento, color: "#0f766e", bg: "linear-gradient(180deg, #effcf8 0%, #ffffff 100%)", border: "#d4f5ed", data: fBack, title: "Executivo — Processos em andamento" },
+              { label: "Cancelados", value: executiveStrategic.cancelados, color: "#ea580c", bg: "linear-gradient(180deg, #fff5ed 0%, #ffffff 100%)", border: "#ffe0cc", data: fBase.filter(r => r.isCanceled), title: "Executivo — Processos cancelados" },
+              { label: "Fracassados", value: executiveStrategic.fracassados, color: "#7c3aed", bg: "linear-gradient(180deg, #f7f1ff 0%, #ffffff 100%)", border: "#eadbff", data: fBase.filter(r => r.isFailed), title: "Executivo — Processos fracassados" },
+            ].map(card => (
+              <div
+                key={card.label}
+                onClick={() => setDrillDown({ title: card.title, data: card.data, color: card.color, sourceAba: "executivo" })}
+                style={{
+                  cursor: "pointer",
+                  background: card.bg,
+                  border: `1px solid ${card.border}`,
+                  borderRadius: 22,
+                  padding: "16px 18px",
+                  boxShadow: "0 10px 26px rgba(15,23,42,0.05)",
+                }}
+              >
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--gaq-text-3)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>{card.label}</div>
+                <div className="gaq-num" style={{ fontSize: 30, fontWeight: 800, lineHeight: 1, color: card.color }}>{card.value.toLocaleString("pt-BR")}</div>
+              </div>
+            ))}
+          </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1fr)", gap: 18, marginBottom: 18 }}>
             <div className="gaq-card" style={{ padding: 22 }}>
               <div className="gaq-section-h">
@@ -5006,32 +5153,50 @@ const topModLentas = (() => {
             <div className="gaq-card" style={{ padding: 22 }}>
               <div className="gaq-section-h">
                 <div>
-                  <div className="gaq-h3">Mudanças na actualização</div>
-                  <div className="sub">
-                    {executiveStrategic.baseDiffInfo.hasPrevious
-                      ? `Comparado com ${executiveStrategic.baseDiffInfo.previousAt || "a base anterior"}`
-                      : "Sem base anterior para comparar"}
-                  </div>
+                  <div className="gaq-h3">Ranking histórico concluído</div>
+                  <div className="sub">Quem mais concluiu compras e com menor tempo médio</div>
                 </div>
-                {executiveStrategic.baseDiffInfo.currentAt && <span className="gaq-meta">{executiveStrategic.baseDiffInfo.currentAt}</span>}
+                <span className="gaq-meta">{(executiveStrategic.buyerRankingConcluded || []).length} comprador(es)</span>
               </div>
-              {!executiveStrategic.baseDiffInfo.hasPrevious
-                ? <div style={{ color: "var(--gaq-text-3)", fontSize: 13, paddingTop: 8 }}>A lista de mudanças passa a ser preenchida a partir da próxima actualização da base.</div>
-                : executiveStrategic.baseDiffFeed.length === 0
-                  ? <div style={{ color: "var(--gaq-text-3)", fontSize: 13, paddingTop: 8 }}>Nenhuma mudança relevante foi identificada face à base anterior.</div>
-                  : executiveStrategic.baseDiffFeed.map((change, idx) => (
-                    <div key={change.key} onClick={() => change.proc && setSelProc(change.proc)}
-                      style={{ display: "flex", gap: 12, padding: "10px 0", borderTop: idx ? "1px solid var(--gaq-line)" : "none", cursor: change.proc ? "pointer" : "default" }}>
-                      <div style={{ width: 28, height: 28, borderRadius: "50%", background: `${change.color}22`, color: change.color, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 10, flex: "none" }}>
-                        {change.icon}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--gaq-text)" }}>{change.title}</div>
-                        <div className="gaq-meta" style={{ marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{change.detail}</div>
-                      </div>
-                      <span className="gaq-meta gaq-num" style={{ flex: "none" }}>{change.stamp}</span>
+              {(!executiveStrategic.buyerRankingConcluded || executiveStrategic.buyerRankingConcluded.length === 0)
+                ? <div style={{ color: "var(--gaq-text-3)", fontSize: 13, paddingTop: 8 }}>Sem histórico concluído suficiente no recorte actual.</div>
+                : <div style={{ marginTop: 4 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "28px minmax(0,1fr) minmax(160px, 220px) 78px 78px", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--gaq-line)" }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: "var(--gaq-text-3)", textTransform: "uppercase" }}>#</span>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: "var(--gaq-text-3)", textTransform: "uppercase" }}>Comprador</span>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: "var(--gaq-text-3)", textTransform: "uppercase" }}>Modalidades</span>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: "var(--gaq-text-3)", textTransform: "uppercase", textAlign: "right" }}>Concluídos</span>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: "var(--gaq-text-3)", textTransform: "uppercase", textAlign: "right" }}>Média d.u.</span>
                     </div>
-                  ))}
+                    {executiveStrategic.buyerRankingConcluded.map((b, idx) => (
+                      <div key={b.nome}
+                        onClick={() => setDrillDown({ title: `Executivo — Concluídos por ${b.nome}`, data: b.rows || [], color: "#1f6feb", sourceAba: "executivo" })}
+                        style={{ display: "grid", gridTemplateColumns: "28px minmax(0,1fr) minmax(160px, 220px) 78px 78px", gap: 8, padding: "10px 0", borderBottom: "1px solid var(--gaq-line)", alignItems: "center", cursor: "pointer" }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--gaq-text-3)" }}>{idx + 1}</span>
+                        <span style={{ fontSize: 12.5, fontWeight: 500, color: "var(--gaq-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.nome}</span>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ height: 10, background: "rgba(15,23,42,0.06)", borderRadius: 999, overflow: "hidden", display: "flex" }}>
+                            {(b.modParts || []).map(part => (
+                              <div
+                                key={`${b.nome}-${part.label}`}
+                                title={`${part.label}: ${part.count} concluído(s) · ${part.pctBuyer}% da carteira de ${b.nome}`}
+                                style={{ width: `${Math.max(part.pctBuyer, part.count > 0 ? 6 : 0)}%`, background: part.color, minWidth: part.count > 0 ? 8 : 0 }}
+                              />
+                            ))}
+                          </div>
+                          <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            {(b.modParts || []).slice(0, 3).map(part => (
+                              <span key={`${b.nome}-${part.label}-chip`} style={{ fontSize: 10, color: "var(--gaq-text-3)", background: "var(--gaq-bg-2)", borderRadius: 999, padding: "3px 7px" }}>
+                                <span style={{ color: part.color, fontWeight: 700 }}>{part.count}</span> {part.label}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <span className="gaq-num" style={{ fontSize: 13, fontWeight: 700, textAlign: "right", color: "var(--gaq-blue)" }}>{b.concluidos}</span>
+                        <span className="gaq-num" style={{ fontSize: 12, fontWeight: 500, textAlign: "right", color: b.mediaDU > 90 ? "var(--gaq-red)" : b.mediaDU > 45 ? "var(--gaq-orange)" : "var(--gaq-green)" }}>{b.mediaDU} d.u.</span>
+                      </div>
+                    ))}
+                  </div>}
             </div>
           </div>
 
@@ -5728,10 +5893,11 @@ const topModLentas = (() => {
 
         {/* ════════════ ABA: OPERACIONAL ════════════ */}
         {aba === "operacional" && (base.length > 0 ? <div className="anim-fade">
-          <div style={{ background: "linear-gradient(135deg, #2c3e50 0%, #34495e 100%)", borderRadius: 14, padding: "18px 24px", marginBottom: 16, color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+          <div className="gaq-card" style={{ background: "linear-gradient(135deg, #17324d 0%, #274d72 100%)", borderRadius: 26, padding: "24px 28px", marginBottom: 18, color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 14, border: "none" }}>
             <div>
-              <div style={{ fontSize: 18, fontWeight: 800 }}>📉 Dashboard Operacional</div>
-              <div style={{ fontSize: 11, opacity: .7 }}>Visão detalhada para acompanhamento diário · Filtros globais ativos</div>
+              <div style={{ fontSize: 10, opacity: .72, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 6 }}>Painel operacional</div>
+              <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-0.02em" }}>Acompanhamento diário da carteira activa</div>
+              <div style={{ fontSize: 12, opacity: .78, marginTop: 4 }}>Régua global de SLA e entrega aplicada aos filtros actuais</div>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
               <button onClick={() => {
@@ -5762,7 +5928,10 @@ const topModLentas = (() => {
                 const diaNome = diasSemana[hoje.getDay()];
                 const emA = fBase.filter(r => r.emA);
                 const totalEmA = emA.length;
-                const criticos = emA.filter(r => r.diasTotais > 100).length;
+                const criticos = emA.filter(r => {
+                  const sla = calcSLAClassification(r, phaseIntervals);
+                  return sla && sla.bucket === "critico";
+                }).length;
                 const parados = emA.filter(r => r.diasParado > 15).length;
 
                 // 1. Abre o PDF em nova janela para salvar/imprimir
@@ -5780,7 +5949,7 @@ Segue em anexo o Relatório GAQ referente à ${diaNome}-feira, ${dataFmt}.
 
 Área filtrada: ${area}
 Processos em andamento: ${totalEmA}
-Críticos (>100 d.u.): ${criticos}
+Críticos (SLA + entrega): ${criticos}
 Estagnados (>15 d.u. sem movimentação): ${parados}
 
 O relatório completo está em anexo (PDF GAQ Sexta).
@@ -5818,9 +5987,30 @@ GAQ — Gerência de Aquisições`;
             const totalF = fBase.length;
             const mediaAging = emAF.length ? Math.round(emAF.reduce((s,r) => s + r.diasTotais, 0) / emAF.length) : 0;
             const semPedido = emAF.filter(r => r.semEnvio).length;
-            const crit30 = emAF.filter(r => r.diasTotais > 30).length;
-            const crit60 = emAF.filter(r => r.diasTotais > 60).length;
-            const crit90 = emAF.filter(r => r.diasTotais > 90).length;
+            const opRowKey = (r) => r.ProcessKey || `${r.NumRC || ""}|${r.TicketSD || ""}|${r.Objeto || ""}`;
+            const opClassificados = emAF.map(r => {
+              const sla = calcSLAClassification(r, phaseIntervals);
+              return sla ? { ...r, _sla: sla } : null;
+            }).filter(Boolean);
+            const opSlaMap = new Map(opClassificados.map(r => [opRowKey(r), r._sla]));
+            const getOpSla = (r) => opSlaMap.get(opRowKey(r)) || calcSLAClassification(r, phaseIntervals);
+            const isOpCritico = (r) => getOpSla(r)?.bucket === "critico";
+            const isOpAtencao = (r) => getOpSla(r)?.bucket === "atencao";
+            const isOpSlaVencido = (r) => getOpSla(r)?.bucket === "sla_vencido";
+            const opsCriticos = opClassificados.filter(r => r._sla.bucket === "critico");
+            const opsAtencao = opClassificados.filter(r => r._sla.bucket === "atencao");
+            const opsSlaVencido = opClassificados.filter(r => r._sla.bucket === "sla_vencido");
+            const opsSlaAtendido = opClassificados.filter(r => r._sla.bucket === "no_prazo");
+            const opTone = (r) => {
+              const bucket = getOpSla(r)?.bucket;
+              return bucket === "critico"
+                ? "#d35400"
+                : bucket === "atencao"
+                  ? "#ff9500"
+                  : bucket === "sla_vencido"
+                    ? "#ff3b30"
+                    : "#34c759";
+            };
 
             // Status detalhado breakdown
             const statusDetMap = {};
@@ -5829,17 +6019,17 @@ GAQ — Gerência de Aquisições`;
 
             // Por modalidade (em andamento filtrado)
             const modMap = {};
-            emAF.forEach(r => { const m = r.Modalidade || "N/I"; if (!modMap[m]) modMap[m] = { total: 0, crit: 0, sumDias: 0 }; modMap[m].total++; if (r.diasTotais > 50) modMap[m].crit++; modMap[m].sumDias += r.diasTotais; });
+            emAF.forEach(r => { const m = r.Modalidade || "N/I"; if (!modMap[m]) modMap[m] = { total: 0, crit: 0, sumDias: 0 }; modMap[m].total++; if (isOpCritico(r)) modMap[m].crit++; modMap[m].sumDias += r.diasTotais; });
             const modArr = Object.entries(modMap).map(([name, v]) => ({ name, ...v, media: Math.round(v.sumDias / v.total) })).sort((a,b) => b.total - a.total);
 
             // Por área (em andamento filtrado)
             const areaMap = {};
-            emAF.forEach(r => { const a = r["Área Requisitante"] || "N/I"; if (!areaMap[a]) areaMap[a] = { total: 0, crit: 0, sumDias: 0 }; areaMap[a].total++; if (r.diasTotais > 50) areaMap[a].crit++; areaMap[a].sumDias += r.diasTotais; });
+            emAF.forEach(r => { const a = r["Área Requisitante"] || "N/I"; if (!areaMap[a]) areaMap[a] = { total: 0, crit: 0, sumDias: 0 }; areaMap[a].total++; if (isOpCritico(r)) areaMap[a].crit++; areaMap[a].sumDias += r.diasTotais; });
             const areaArr = Object.entries(areaMap).map(([name, v]) => ({ name, ...v, media: Math.round(v.sumDias / v.total) })).sort((a,b) => b.total - a.total);
 
             // Por comprador (em andamento filtrado) — NCL: respNCL (Comprador||Avaliador), CPL: Pregoeiro
             const compMap = {};
-            emAF.forEach(r => { const c = r.ehCPL ? (r.Pregoeiro || r.cplResp || "N/I") : (r.respNCL || "N/I"); if (!compMap[c]) compMap[c] = { total: 0, crit: 0, sumDias: 0 }; compMap[c].total++; if (r.diasTotais > 50) compMap[c].crit++; compMap[c].sumDias += r.diasTotais; });
+            emAF.forEach(r => { const c = r.ehCPL ? (r.Pregoeiro || r.cplResp || "N/I") : (r.respNCL || "N/I"); if (!compMap[c]) compMap[c] = { total: 0, crit: 0, sumDias: 0 }; compMap[c].total++; if (isOpCritico(r)) compMap[c].crit++; compMap[c].sumDias += r.diasTotais; });
             const compArr = Object.entries(compMap).map(([name, v]) => ({ name, ...v, media: Math.round(v.sumDias / v.total) })).sort((a,b) => b.crit - a.crit || b.total - a.total);
 
             // Fases do processo (quantos estão em cada etapa)
@@ -5867,27 +6057,27 @@ GAQ — Gerência de Aquisições`;
 
             return <>
             {/* KPIs */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 10, marginBottom: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 18 }}>
               {[
-                { t: "Em Andamento", v: emAF.length, c: "#3498db" },
-                { t: "Média Aging", v: mediaAging + " d.u.", c: mediaAging > 60 ? "#c0392b" : "#2e86c1" },
-                { t: "Sem Pedido", v: semPedido, c: semPedido > 10 ? "#e67e22" : "#27ae60" },
-                { t: ">30 d.u.", v: crit30, c: crit30 > 20 ? "#e67e22" : "#27ae60" },
-                { t: ">60 d.u.", v: crit60, c: crit60 > 10 ? "#c0392b" : "#e67e22" },
-                { t: ">90 d.u.", v: crit90, c: crit90 > 5 ? "#c0392b" : "#e67e22" },
+                { t: "Em andamento", v: emAF.length, c: "#2e86c1" },
+                { t: "Crítico", v: opsCriticos.length, c: "#d35400" },
+                { t: "Em atenção", v: opsAtencao.length, c: "#ff9500" },
+                { t: "SLA vencido", v: opsSlaVencido.length, c: "#ff3b30" },
+                { t: "SLA atendido", v: opsSlaAtendido.length, c: "#34c759" },
+                { t: "Média aging", v: mediaAging + " d.u.", c: mediaAging > 60 ? "#d35400" : "#2e86c1" },
               ].map(k => (
-                <div key={k.t} style={{ background: "var(--card)", borderRadius: 10, padding: "12px 10px", boxShadow: "var(--shadow)", textAlign: "center", borderTop: `3px solid ${k.c}` }}>
-                  <div style={{ fontSize: 22, fontWeight: 800, color: k.c }}>{k.v}</div>
-                  <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 600, textTransform: "uppercase" }}>{k.t}</div>
+                <div key={k.t} className="gaq-card" style={{ padding: "16px 18px", borderTop: `3px solid ${k.c}` }}>
+                  <div style={{ fontSize: 10, color: "var(--gaq-text-3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>{k.t}</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: k.c, lineHeight: 1 }}>{k.v}</div>
                 </div>
               ))}
             </div>
 
             {/* Funil de Fases */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
-              <div style={{ background: "var(--card)", borderRadius: 12, padding: 16, boxShadow: "var(--shadow)", position: "relative" }}>
+              <div className="gaq-card" style={{ padding: 22, borderRadius: 24, position: "relative" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)" }}>🔄 Funil de Fases — Processos em Andamento</div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "var(--gaq-text)" }}>Funil de fases</div>
                   <button onClick={() => setShowFunilInfo(!showFunilInfo)}
                     style={{ background: showFunilInfo ? "#2e86c1" : "var(--border2)", border: "none", borderRadius: "50%", width: 22, height: 22, cursor: "pointer", fontSize: 12, fontWeight: 800, color: showFunilInfo ? "#fff" : "var(--text3)", flexShrink: 0, lineHeight: "22px", textAlign: "center" }}
                     title="Ver regras de classificação das fases">ℹ</button>
@@ -5926,8 +6116,8 @@ GAQ — Gerência de Aquisições`;
                 })}
               </div>
 
-              <div style={{ background: "var(--card)", borderRadius: 12, padding: 16, boxShadow: "var(--shadow)" }}>
-                <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)", marginBottom: 10 }}>📊 Distribuição de Aging (d.u.) — Em Andamento</div>
+              <div className="gaq-card" style={{ padding: 22, borderRadius: 24 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "var(--gaq-text)", marginBottom: 10 }}>Distribuição de aging</div>
                 <Recharts.ResponsiveContainer width="100%" height={200}>
                   <Recharts.BarChart data={agingChart} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
                     <Recharts.XAxis dataKey="faixa" fontSize={10} tick={{ fill: "var(--text3)" }} />
@@ -5943,8 +6133,8 @@ GAQ — Gerência de Aquisições`;
 
             {/* Status Detalhado + Por Modalidade */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
-              <div style={{ background: "var(--card)", borderRadius: 12, padding: 16, boxShadow: "var(--shadow)" }}>
-                <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)", marginBottom: 10 }}>📋 Status Detalhado — Em Andamento (Top 15)</div>
+              <div className="gaq-card" style={{ padding: 22, borderRadius: 24 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "var(--gaq-text)", marginBottom: 10 }}>Status detalhado</div>
                 {statusDetArr.slice(0, 15).map(([s, cnt]) => (
                   <div key={s} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid var(--border2)", fontSize: 11, gap: 8, alignItems: "center" }}>
                     <span style={{ color: "var(--text)", flex: 1, wordBreak: "break-word", lineHeight: 1.3 }} title={s}>{s}</span>
@@ -5952,8 +6142,8 @@ GAQ — Gerência de Aquisições`;
                   </div>
                 ))}
               </div>
-              <div style={{ background: "var(--card)", borderRadius: 12, padding: 16, boxShadow: "var(--shadow)" }}>
-                <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)", marginBottom: 10 }}>⚙️ Por Modalidade — Em Andamento</div>
+              <div className="gaq-card" style={{ padding: 22, borderRadius: 24 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "var(--gaq-text)", marginBottom: 10 }}>Modalidades activas</div>
                 {modArr.slice(0, 10).map(m => (
                   <div key={m.name} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid var(--border2)", fontSize: 11, gap: 6, alignItems: "center", cursor: "pointer" }}
                     onClick={() => { 
@@ -5973,8 +6163,8 @@ GAQ — Gerência de Aquisições`;
 
             {/* Por Área + Top Compradores */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
-              <div style={{ background: "var(--card)", borderRadius: 12, padding: 16, boxShadow: "var(--shadow)" }}>
-                <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)", marginBottom: 10 }}>🏢 Por Área Requisitante — Em Andamento</div>
+              <div className="gaq-card" style={{ padding: 22, borderRadius: 24 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "var(--gaq-text)", marginBottom: 10 }}>Áreas requisitantes</div>
                 <Recharts.ResponsiveContainer width="100%" height={Math.max(150, areaArr.slice(0,10).length * 28)}>
                   <Recharts.BarChart data={areaArr.slice(0, 10)} layout="vertical" margin={{ left: 80, right: 20 }}>
                     <Recharts.XAxis type="number" fontSize={10} />
@@ -5986,8 +6176,8 @@ GAQ — Gerência de Aquisições`;
                 </Recharts.ResponsiveContainer>
               </div>
               {!loginUser && !loginArea
-                ? <div style={{ background: "var(--card)", borderRadius: 12, padding: 16, boxShadow: "var(--shadow)" }}>
-                    <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)", marginBottom: 10 }}>👤 Top Responsáveis — Carga + Críticos</div>
+                ? <div className="gaq-card" style={{ padding: 22, borderRadius: 24 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: "var(--gaq-text)", marginBottom: 10 }}>Responsáveis com mais pressão</div>
                     {compArr.slice(0, 12).map((c, i) => (
                       <div key={c.name} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid var(--border2)", fontSize: 11, gap: 6, alignItems: "center", cursor: "pointer" }}
                         onClick={() => {
@@ -6006,12 +6196,12 @@ GAQ — Gerência de Aquisições`;
                     ))}
                   </div>
                 : loginArea
-                  ? <div style={{ background: "var(--card)", borderRadius: 12, padding: 16, boxShadow: "var(--shadow)" }}>
-                      <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)", marginBottom: 10 }}>📋 Processos em Andamento — {loginArea}</div>
+                  ? <div className="gaq-card" style={{ padding: 22, borderRadius: 24 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: "var(--gaq-text)", marginBottom: 10 }}>Processos em andamento — {loginArea}</div>
                       {emAF.length === 0
                         ? <div style={{ color: "var(--text3)", fontSize: 12 }}>Nenhum processo em andamento.</div>
-                        : [...emAF].sort((a,b) => b.diasTotais - a.diasTotais).slice(0, 15).map(r => {
-                            const cor = r.diasTotais > 100 ? "#c0392b" : r.diasTotais > 50 ? "#e67e22" : r.diasTotais > 30 ? "#f39c12" : "#27ae60";
+                        : [...emAF].sort((a,b) => (getOpSla(b)?.rank || 0) - (getOpSla(a)?.rank || 0) || (b.diasTotais - a.diasTotais)).slice(0, 15).map(r => {
+                            const cor = opTone(r);
                             return (
                               <div key={r.ProcessKey} onClick={() => setSelProc(r)}
                                 style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: "1px solid var(--border2)", cursor: "pointer" }}>
@@ -6030,12 +6220,12 @@ GAQ — Gerência de Aquisições`;
                           })
                       }
                     </div>
-                  : <div style={{ background: "var(--card)", borderRadius: 12, padding: 16, boxShadow: "var(--shadow)" }}>
-                    <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)", marginBottom: 10 }}>🎯 Minha Lista de Prioridade</div>
+                  : <div className="gaq-card" style={{ padding: 22, borderRadius: 24 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: "var(--gaq-text)", marginBottom: 10 }}>Minha carteira prioritária</div>
                     {fBack.length === 0
                       ? <div style={{ color: "var(--text3)", fontSize: 12 }}>Nenhum processo em andamento.</div>
-                      : [...fBack].sort((a,b) => b.diasTotais - a.diasTotais).slice(0, 15).map(r => {
-                          const cor = r.diasTotais > 100 ? "#c0392b" : r.diasTotais > 50 ? "#e67e22" : r.diasTotais > 30 ? "#f39c12" : "#27ae60";
+                      : [...fBack].sort((a,b) => (getOpSla(b)?.rank || 0) - (getOpSla(a)?.rank || 0) || (b.diasTotais - a.diasTotais)).slice(0, 15).map(r => {
+                          const cor = opTone(r);
                           return (
                             <div key={r.ProcessKey} onClick={() => setSelProc(r)}
                               style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: "1px solid var(--border2)", cursor: "pointer" }}>
@@ -6066,9 +6256,9 @@ GAQ — Gerência de Aquisições`;
               const avgM = mesCount.reduce((a,b)=>a+b,0) / 12;
               if (maxM < 3) return null;
               return (
-                <div style={{ background: "var(--card)", borderRadius: 12, padding: 16, boxShadow: "var(--shadow)", marginBottom: 16 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)", marginBottom: 14 }}>📅 Sazonalidade — Padrão de Aberturas por Mês - (2025)</div>
-                  <div style={{ display: "flex", gap: 4, alignItems: "flex-end", minHeight: 90, paddingTop: 4 }}>
+                <div className="gaq-card" style={{ padding: 22, borderRadius: 24, marginBottom: 16 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "var(--gaq-text)", marginBottom: 14 }}>Sazonalidade de aberturas</div>
+                    <div style={{ display: "flex", gap: 6, alignItems: "flex-end", minHeight: 90, paddingTop: 4 }}>
                     {mesCount.map((c, i) => {
                       const h = maxM > 0 ? Math.max(6, (c / maxM) * 80) : 6;
                       const isPeak = c > avgM * 1.3;
@@ -6094,15 +6284,15 @@ GAQ — Gerência de Aquisições`;
             })()}
 
             {/* Insights Operacionais */}
-            <div style={{ background: "var(--card)", borderRadius: 12, padding: 16, boxShadow: "var(--shadow)" }}>
-              <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)", marginBottom: 10 }}>💡 Insights Operacionais (filtros aplicados)</div>
+            <div className="gaq-card" style={{ padding: 22, borderRadius: 24 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "var(--gaq-text)", marginBottom: 10 }}>Insights operacionais</div>
               {(() => {
                 const opsInsights = [];
                 const bigFase = fases.sort((a,b) => b.count - a.count)[0];
                 if (bigFase && bigFase.count > 5) opsInsights.push({ icon: "🔄", text: `Maior concentração na fase "${bigFase.label}" com ${bigFase.count} processos. Avaliar ações para destravar esta etapa.`, color: "#d35400" });
                 const topComp = compArr[0];
-                if (!loginArea && topComp && topComp.crit > 3) opsInsights.push({ icon: "👤", text: `${topComp.name} concentra ${topComp.crit} processos críticos (>50 d.u.) de ${topComp.total} total. Priorizar redistribuição.`, color: "#c0392b" });
-                if (loginArea && emAF.filter(r => r.diasTotais > 50).length > 0) opsInsights.push({ icon: "⚠️", text: `${emAF.filter(r => r.diasTotais > 50).length} processo(s) da área ${loginArea} com mais de 50 d.u. em andamento. Verificar priorização junto ao GAQ.`, color: "#c0392b" });
+                if (!loginArea && topComp && topComp.crit > 3) opsInsights.push({ icon: "👤", text: `${topComp.name} concentra ${topComp.crit} processos críticos pela régua global de SLA e entrega. Priorizar redistribuição.`, color: "#c0392b" });
+                if (loginArea && opsCriticos.length > 0) opsInsights.push({ icon: "⚠️", text: `${opsCriticos.length} processo(s) da área ${loginArea} estão críticos pela combinação SLA + entrega. Verificar priorização junto ao GAQ.`, color: "#c0392b" });
                 const topArea = areaArr.sort((a,b) => b.crit - a.crit)[0];
                 if (topArea && topArea.crit > 3) opsInsights.push({ icon: "🏢", text: `Área "${topArea.name}" tem ${topArea.crit} processos críticos. Possível problema na especificação ou complexidade dos objetos desta área.`, color: "#e67e22" });
                 if (mediaAging > 50) opsInsights.push({ icon: "⏱", text: `Aging médio de ${mediaAging} d.u. está elevado. Meta recomendada: abaixo de 50 d.u.`, color: "#c0392b" });
@@ -7267,7 +7457,7 @@ GAQ — Gerência de Aquisições`;
         </div>}
 
         {/* ════════════ ABA: LINHA DE METRO ════════════ */}
-        {aba === "metro" && <div className="anim-fade">
+        {aba === "metro" && <div className="anim-fade" style={{ minHeight: "max-content", overflow: "visible", paddingBottom: 40 }}>
           {base.length === 0 ? (
             <div style={{ textAlign: "center", padding: 60, color: "var(--text3)" }}>
               <div style={{ fontSize: 38 }}>🚇</div>
@@ -7295,6 +7485,13 @@ GAQ — Gerência de Aquisições`;
             const metroTotal = filteredMetro.length;
             const metroPage = Math.min(pgMetro, Math.ceil(metroTotal / pgMetroSz) || 1);
             const metroSlice = filteredMetro.slice((metroPage - 1) * pgMetroSz, metroPage * pgMetroSz);
+            const forwardMetroWheel = (e) => {
+              if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+              const scroller = e.currentTarget.closest("[data-metro-scroll='true']");
+              if (!scroller) return;
+              scroller.scrollTop += e.deltaY;
+              e.preventDefault();
+            };
 
             const renderStation = (r, i, total, lineColor) => {
               const sc = stColor(r);
@@ -7370,7 +7567,7 @@ GAQ — Gerência de Aquisições`;
                     </div>
 
                     {/* Steps track — scrollable horizontally */}
-                    <div style={{ overflowX: "auto", paddingBottom: 4 }}>
+                    <div onWheel={forwardMetroWheel} style={{ overflowX: "auto", overflowY: "hidden", overscrollBehaviorX: "contain", paddingBottom: 4 }}>
                       <div style={{ display: "flex", alignItems: "flex-start", gap: 0, minWidth: "max-content" }}>
                         {stepInfo.map((step, ri) => (
                           <React.Fragment key={ri}>
@@ -7479,7 +7676,7 @@ GAQ — Gerência de Aquisições`;
               : [{ name: null, color: "#1565c0", items: metroSlice }];
 
             return (
-              <div>
+              <div style={{ minHeight: "max-content", paddingLeft: 20, paddingRight: 10 }}>
                 {/* Cabecalho */}
                 <div style={{ marginBottom: 18 }}>
                   <div className="gaq-h1" style={{ marginBottom: 4 }}>Linha do Metro</div>
@@ -7505,60 +7702,62 @@ GAQ — Gerência de Aquisições`;
                   </select>
                 </div>
 
-                {filteredMetro.length === 0 ? (
-                  <div style={{ textAlign: "center", padding: 60, color: "var(--text3)" }}>
-                    <div style={{ fontSize: 32 }}>🚉</div>
-                    <div style={{ marginTop: 8 }}>Nenhum processo encontrado com os filtros atuais.</div>
-                  </div>
-                ) : (
-                  <div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
-                      {groups.map((group, gi) => (
-                        <div key={group.name || "all"}>
-                          {group.name && (
-                            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-                              <div style={{ width: 13, height: 13, borderRadius: "50%", background: group.color, flexShrink: 0 }} />
-                              <div style={{ fontWeight: 800, fontSize: 15, color: "var(--text)" }}>{group.name}</div>
-                              <div style={{ height: 2, flex: 1, background: group.color, opacity: .22, borderRadius: 2 }} />
-                              <span style={{ background: group.color + "22", color: group.color, borderRadius: 10, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{group.items.length}</span>
+                <div style={{ paddingRight: 6, paddingBottom: 28 }}>
+                  {filteredMetro.length === 0 ? (
+                    <div style={{ textAlign: "center", padding: 60, color: "var(--text3)" }}>
+                      <div style={{ fontSize: 32 }}>🚉</div>
+                      <div style={{ marginTop: 8 }}>Nenhum processo encontrado com os filtros atuais.</div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+                        {groups.map((group, gi) => (
+                          <div key={group.name || "all"}>
+                            {group.name && (
+                              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                                <div style={{ width: 13, height: 13, borderRadius: "50%", background: group.color, flexShrink: 0 }} />
+                                <div style={{ fontWeight: 800, fontSize: 15, color: "var(--text)" }}>{group.name}</div>
+                                <div style={{ height: 2, flex: 1, background: group.color, opacity: .22, borderRadius: 2 }} />
+                                <span style={{ background: group.color + "22", color: group.color, borderRadius: 10, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{group.items.length}</span>
+                              </div>
+                            )}
+                            <div style={{ paddingLeft: group.name ? 6 : 0 }}>
+                              {group.items.map((r, i) => renderStation(r, i, group.items.length, group.color))}
                             </div>
-                          )}
-                          <div style={{ paddingLeft: group.name ? 6 : 0 }}>
-                            {group.items.map((r, i) => renderStation(r, i, group.items.length, group.color))}
+                          </div>
+                        ))}
+                      </div>
+                      {/* Paginação */}
+                      {metroTotal > pgMetroSz && (
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 4px", flexWrap: "wrap", gap: 8, borderTop: "1px solid var(--border2)", marginTop: 8 }}>
+                          <div style={{ fontSize: 12, color: "var(--text3)" }}>
+                            {((metroPage-1)*pgMetroSz)+1}–{Math.min(metroPage*pgMetroSz, metroTotal)} de {metroTotal.toLocaleString("pt-BR")}
+                          </div>
+                          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                            <select value={pgMetroSz} onChange={e => { setPgMetroSz(+e.target.value); setPgMetro(1); }}
+                              style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid var(--input-bd)", fontSize: 12, background: "var(--input-bg)", color: "var(--text)" }}>
+                              {[50, 100].map(n => <option key={n} value={n}>{n}/pág</option>)}
+                            </select>
+                            <button disabled={metroPage <= 1} onClick={() => setPgMetro(p => p - 1)}
+                              style={{ padding: "4px 10px", borderRadius: 5, border: "1px solid var(--border)", background: "var(--card)", color: "var(--text)", cursor: metroPage <= 1 ? "default" : "pointer", fontSize: 12, fontWeight: 600, opacity: metroPage <= 1 ? .4 : 1 }}>◀</button>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text2)", minWidth: 70, textAlign: "center" }}>
+                              {metroPage} / {Math.ceil(metroTotal / pgMetroSz)}
+                            </span>
+                            <button disabled={metroPage >= Math.ceil(metroTotal / pgMetroSz)} onClick={() => setPgMetro(p => p + 1)}
+                              style={{ padding: "4px 10px", borderRadius: 5, border: "1px solid var(--border)", background: "var(--card)", color: "var(--text)", cursor: metroPage >= Math.ceil(metroTotal / pgMetroSz) ? "default" : "pointer", fontSize: 12, fontWeight: 600, opacity: metroPage >= Math.ceil(metroTotal / pgMetroSz) ? .4 : 1 }}>▶</button>
                           </div>
                         </div>
-                      ))}
+                      )}
                     </div>
-                    {/* Paginação */}
-                    {metroTotal > pgMetroSz && (
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 4px", flexWrap: "wrap", gap: 8, borderTop: "1px solid var(--border2)", marginTop: 8 }}>
-                        <div style={{ fontSize: 12, color: "var(--text3)" }}>
-                          {((metroPage-1)*pgMetroSz)+1}–{Math.min(metroPage*pgMetroSz, metroTotal)} de {metroTotal.toLocaleString("pt-BR")}
-                        </div>
-                        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                          <select value={pgMetroSz} onChange={e => { setPgMetroSz(+e.target.value); setPgMetro(1); }}
-                            style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid var(--input-bd)", fontSize: 12, background: "var(--input-bg)", color: "var(--text)" }}>
-                            {[50, 100].map(n => <option key={n} value={n}>{n}/pág</option>)}
-                          </select>
-                          <button disabled={metroPage <= 1} onClick={() => setPgMetro(p => p - 1)}
-                            style={{ padding: "4px 10px", borderRadius: 5, border: "1px solid var(--border)", background: "var(--card)", color: "var(--text)", cursor: metroPage <= 1 ? "default" : "pointer", fontSize: 12, fontWeight: 600, opacity: metroPage <= 1 ? .4 : 1 }}>◀</button>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text2)", minWidth: 70, textAlign: "center" }}>
-                            {metroPage} / {Math.ceil(metroTotal / pgMetroSz)}
-                          </span>
-                          <button disabled={metroPage >= Math.ceil(metroTotal / pgMetroSz)} onClick={() => setPgMetro(p => p + 1)}
-                            style={{ padding: "4px 10px", borderRadius: 5, border: "1px solid var(--border)", background: "var(--card)", color: "var(--text)", cursor: metroPage >= Math.ceil(metroTotal / pgMetroSz) ? "default" : "pointer", fontSize: 12, fontWeight: 600, opacity: metroPage >= Math.ceil(metroTotal / pgMetroSz) ? .4 : 1 }}>▶</button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             );
           })()}
         </div>}
 
         {/* ════════════ ABA: PANTANAL ════════════ */}
-        {aba === "pantanal" && <div className="anim-fade">
+        {aba === "pantanal" && <div className="anim-fade" style={{ minHeight: "max-content", overflow: "visible", paddingBottom: 40 }}>
           {base.length === 0 ? (
             <div style={{ textAlign: "center", padding: 60, color: "var(--text3)" }}>
               <div style={{ fontSize: 38 }}>🌿</div>
@@ -7596,7 +7795,7 @@ GAQ — Gerência de Aquisições`;
             const antigo  = pantanalProcs.filter(r => du(r.aberturaSD, hoje) >= 50).length;
 
             return (
-              <div>
+              <div style={{ minHeight: "max-content" }}>
                 {/* Cabecalho */}
                 <div style={{ marginBottom: 18 }}>
                   <div className="gaq-h1" style={{ marginBottom: 4 }}>Pantanal</div>
@@ -7700,31 +7899,31 @@ GAQ — Gerência de Aquisições`;
         </div>}
 
         {/* ════════════ ABA: PLANEJAMENTO DE COMPRA ════════════ */}
-        {aba === "planejamento" && !loginUser && !loginArea && <div className="anim-fade">
+        {aba === "planejamento" && !loginUser && !loginArea && <div className="anim-fade" style={{ paddingBottom: 16 }}>
           {base.length === 0 ? (
-            <div style={{ textAlign: "center", padding: 80, color: "#6b7280", background: "#f9f8f6", borderRadius: 16, border: "1px dashed #d1d5db" }}>
+            <div className="gaq-card" style={{ textAlign: "center", padding: 80, color: "#6b7280", background: "#f9f8f6", borderRadius: 28, border: "1px dashed #d1d5db" }}>
               <div style={{ fontSize: 48, marginBottom: 12, opacity: .4 }}>◈</div>
               <div style={{ fontWeight: 700, fontSize: 16, color: "#111", marginBottom: 6 }}>Planejamento de Compras</div>
               <div style={{ fontSize: 13, marginBottom: 20 }}>Carregue a base de dados para gerar forecasts e insights.</div>
-              <button onClick={() => setAba("upload")} style={{ background: "#111", color: "#fff", border: "none", borderRadius: 4, padding: "10px 28px", cursor: "pointer", fontSize: 13, fontWeight: 600, letterSpacing: .5 }}>Carregar Base</button>
+              <button onClick={() => setAba("upload")} style={{ background: "#111", color: "#fff", border: "none", borderRadius: 999, padding: "10px 28px", cursor: "pointer", fontSize: 13, fontWeight: 600, letterSpacing: .5 }}>Carregar Base</button>
             </div>
           ) : (() => {
-            /* ── Design system: Olympus-inspired (editorial sóbrio, off-white, tipografia grande, dot grid) ── */
+            /* ── Design system: clean, light and Apple-like ── */
             const PL = {
-              bg:      "#f5f3ee",       // creme off-white
-              bg2:     "#eceae4",       // creme mais escuro para bandas
-              ink:     "#0d0d0d",       // quase preto
-              ink2:    "#3d3d3d",       // cinza escuro
-              ink3:    "#7a7470",       // cinza médio
-              line:    "#d5d0c8",       // linha/divisor
-              accent:  "#1a1a2e",       // navy escuro (botões, badges)
-              accentL: "#e8e4f4",       // lavanda claro
-              green:   "#1a6b4a",
-              greenL:  "#d4f0e3",
-              amber:   "#92400e",
-              amberL:  "#fef3c7",
-              red:     "#991b1b",
-              redL:    "#fee2e2",
+              bg:      "#f5f5f7",
+              bg2:     "#ffffff",
+              ink:     "#101828",
+              ink2:    "#344054",
+              ink3:    "#667085",
+              line:    "#e5e7eb",
+              accent:  "#0a84ff",
+              accentL: "#e8f2ff",
+              green:   "#138a58",
+              greenL:  "#def7e8",
+              amber:   "#b26a00",
+              amberL:  "#fff3d6",
+              red:     "#c2410c",
+              redL:    "#ffede5",
               mono:    "'SF Mono','Fira Mono','Consolas',monospace",
             };
             const MESES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
@@ -7779,35 +7978,32 @@ GAQ — Gerência de Aquisições`;
             const maxBarMod = Math.max(...topMods.map(m => m.max), 1);
 
             return (
-              <div style={{ background: PL.bg, minHeight: 600, borderRadius: 14, overflow: "hidden", fontFamily: "'Segoe UI','Helvetica Neue',sans-serif" }}>
+              <div style={{ background: PL.bg, minHeight: 600, borderRadius: 32, overflow: "hidden", boxShadow: "0 24px 60px rgba(15,23,42,0.08)", border: "1px solid rgba(15,23,42,0.06)", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif" }}>
 
-                {/* ── HERO: dot-grid + editorial typography (Arcadia-inspired) ── */}
-                <div style={{ background: PL.ink, position: "relative", overflow: "hidden", padding: "48px 48px 36px" }}>
-                  {/* dot grid CSS pattern */}
-                  <div style={{ position: "absolute", inset: 0, backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.07) 1px, transparent 1px)", backgroundSize: "28px 28px", pointerEvents: "none" }} />
-                  {/* right glow */}
-                  <div style={{ position: "absolute", right: 0, top: "50%", transform: "translateY(-50%)", width: 500, height: 500, background: "radial-gradient(ellipse at center, rgba(255,255,255,0.04) 0%, transparent 65%)", pointerEvents: "none" }} />
+                {/* ── HERO: soft gradient + clean glass stats ── */}
+                <div style={{ background: "linear-gradient(135deg, #09111f 0%, #153d6f 52%, #0a84ff 100%)", position: "relative", overflow: "hidden", padding: "42px 42px 34px" }}>
+                  <div style={{ position: "absolute", inset: 0, backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.08) 1px, transparent 1px)", backgroundSize: "30px 30px", pointerEvents: "none" }} />
+                  <div style={{ position: "absolute", right: -60, top: "50%", transform: "translateY(-50%)", width: 520, height: 520, background: "radial-gradient(ellipse at center, rgba(10,132,255,0.28) 0%, transparent 68%)", pointerEvents: "none" }} />
                   <div style={{ position: "relative", zIndex: 1 }}>
-                    <div style={{ fontSize: 10, color: "rgba(255,255,255,.4)", letterSpacing: 4, textTransform: "uppercase", marginBottom: 20, fontWeight: 600 }}>Sesc GAQ — Inteligência de Compras</div>
+                    <div style={{ fontSize: 10, color: "rgba(255,255,255,.52)", letterSpacing: 4, textTransform: "uppercase", marginBottom: 18, fontWeight: 600 }}>Sesc GAQ — Inteligência de Compras</div>
                     <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 20 }}>
                       <div>
-                        <div style={{ fontSize: 52, fontWeight: 900, color: "#fff", lineHeight: 1, letterSpacing: -2, marginBottom: 8 }}>
+                        <div style={{ fontSize: 52, fontWeight: 900, color: "#fff", lineHeight: 1, letterSpacing: -2, marginBottom: 10 }}>
                           PLANEJAMENTO<br/><span style={{ color: "rgba(255,255,255,.25)" }}>{anoAtual}</span>
                         </div>
-                        <div style={{ fontSize: 13, color: "rgba(255,255,255,.5)", fontWeight: 400, maxWidth: 440 }}>
+                        <div style={{ fontSize: 13, color: "rgba(255,255,255,.72)", fontWeight: 400, maxWidth: 460, lineHeight: 1.55 }}>
                           Forecast baseado em {totalConc} processos concluídos em {anoBase}. Sazonalidade, lead time e abertura recomendada por área.
                         </div>
                       </div>
-                      {/* Olympus-style protocol stats */}
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1px", background: "rgba(255,255,255,.1)", borderRadius: 2, overflow: "hidden", minWidth: 280 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, minWidth: 300 }}>
                         {[
                           { label: "Processos " + anoBase, val: totalConc.toLocaleString("pt-BR") },
                           { label: "Lead médio (d.u.)", val: avgLeadGeral + " d.u." },
                           { label: "Mês pico", val: MESES[peakMesIdx] },
                           { label: "SD sem RC (carryover)", val: recorrentes.length },
                         ].map((s, i) => (
-                          <div key={i} style={{ background: "rgba(255,255,255,.05)", padding: "14px 18px" }}>
-                            <div style={{ fontSize: 9, color: "rgba(255,255,255,.35)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 4 }}>{s.label}</div>
+                          <div key={i} style={{ background: "rgba(255,255,255,.12)", backdropFilter: "blur(10px)", border: "1px solid rgba(255,255,255,.14)", borderRadius: 18, padding: "16px 18px" }}>
+                            <div style={{ fontSize: 9, color: "rgba(255,255,255,.55)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 4 }}>{s.label}</div>
                             <div style={{ fontSize: 22, fontWeight: 800, color: "#fff", letterSpacing: -.5 }}>{s.val}</div>
                           </div>
                         ))}
@@ -7843,7 +8039,7 @@ GAQ — Gerência de Aquisições`;
                         return (
                           <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
                             <div style={{ fontSize: 12, fontWeight: isPeak ? 900 : 600, color: numColor, marginBottom: 6, fontVariantNumeric: "tabular-nums" }}>{c}</div>
-                            <div style={{ width: "100%", height: barH, background: barBg, borderRadius: 1, transition: "height .3s" }} />
+                            <div style={{ width: "100%", height: barH, background: barBg, borderRadius: 999, transition: "height .3s" }} />
                             <div style={{ fontSize: 9, color: isPeak ? PL.ink : PL.ink3, marginTop: 6, fontWeight: isPeak ? 800 : 500, textTransform: "uppercase", letterSpacing: .5 }}>{MESES[i]}</div>
                             {isPeak && <div style={{ fontSize: 8, background: PL.ink, color: "#fff", borderRadius: 2, padding: "1px 5px", marginTop: 3, letterSpacing: .5, fontWeight: 700 }}>PICO</div>}
                           </div>
@@ -7864,19 +8060,17 @@ GAQ — Gerência de Aquisições`;
                         const maxPct = maxBarMod > 0 ? Math.round((m.max / maxBarMod) * 100) : 0;
                         const risk = m.avg > 60 ? { bg: PL.redL, text: PL.red, label: "Alto" } : m.avg > 30 ? { bg: PL.amberL, text: PL.amber, label: "Médio" } : { bg: PL.greenL, text: PL.green, label: "Baixo" };
                         return (
-                          <div key={i} style={{ display: "grid", gridTemplateColumns: "200px 1fr 80px 60px", alignItems: "center", gap: 16, padding: "14px 0", borderBottom: `1px solid ${PL.line}` }}>
+                          <div key={i} style={{ display: "grid", gridTemplateColumns: "200px 1fr 80px 72px", alignItems: "center", gap: 16, padding: "14px 0", borderBottom: `1px solid ${PL.line}` }}>
                             <div style={{ fontSize: 12, fontWeight: 700, color: PL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={m.mod}>{m.mod}</div>
-                            <div style={{ position: "relative", height: 10, background: PL.line, borderRadius: 1 }}>
-                              {/* range bar */}
-                              <div style={{ position: "absolute", left: 0, width: maxPct + "%", height: "100%", background: "#d5d0c8", borderRadius: 1 }} />
-                              {/* avg bar */}
-                              <div style={{ position: "absolute", left: 0, width: avgPct + "%", height: "100%", background: PL.ink, borderRadius: 1 }} />
+                            <div style={{ position: "relative", height: 10, background: PL.line, borderRadius: 999 }}>
+                              <div style={{ position: "absolute", left: 0, width: maxPct + "%", height: "100%", background: "#cbd5e1", borderRadius: 999 }} />
+                              <div style={{ position: "absolute", left: 0, width: avgPct + "%", height: "100%", background: PL.accent, borderRadius: 999 }} />
                             </div>
                             <div style={{ textAlign: "right", fontFamily: PL.mono, fontSize: 13, fontWeight: 800, color: PL.ink }}>
                               {m.avg}<span style={{ fontSize: 9, fontWeight: 400, color: PL.ink3, marginLeft: 2 }}>d.u.</span>
                             </div>
                             <div style={{ textAlign: "center" }}>
-                              <span style={{ background: risk.bg, color: risk.text, fontSize: 9, fontWeight: 700, borderRadius: 2, padding: "2px 7px", textTransform: "uppercase", letterSpacing: .5 }}>{risk.label}</span>
+                              <span style={{ background: risk.bg, color: risk.text, fontSize: 9, fontWeight: 700, borderRadius: 999, padding: "4px 9px", textTransform: "uppercase", letterSpacing: .5 }}>{risk.label}</span>
                             </div>
                           </div>
                         );
@@ -7895,16 +8089,16 @@ GAQ — Gerência de Aquisições`;
                       <div style={{ fontSize: 24, fontWeight: 800, color: PL.ink, letterSpacing: -1 }}>Projeção por Área Requisitante</div>
                       <div style={{ fontSize: 12, color: PL.ink3, marginTop: 4 }}>Recomendação de abertura calculada: Mês pico − lead time médio − 20 d.u. buffer</div>
                     </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 1, background: PL.line, borderRadius: 2, overflow: "hidden" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 }}>
                       {topAreas.map((r, i) => {
                         const recMes = (r.peakMes - Math.ceil((r.avgLead + 20) / 21) + 12) % 12;
                         const riskColor = r.avgLead > 60 ? PL.red : r.avgLead > 30 ? PL.amber : PL.green;
                         const riskBg   = r.avgLead > 60 ? PL.redL : r.avgLead > 30 ? PL.amberL : PL.greenL;
                         return (
-                          <div key={i} style={{ background: PL.bg, padding: "20px 22px" }}>
+                          <div key={i} style={{ background: "#fff", padding: "20px 22px", borderRadius: 24, border: `1px solid ${PL.line}`, boxShadow: "0 8px 24px rgba(15,23,42,0.04)" }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                               <div style={{ fontSize: 13, fontWeight: 700, color: PL.ink, flex: 1, paddingRight: 8, lineHeight: 1.3 }}>{r.area}</div>
-                              <div style={{ background: PL.ink, color: "#fff", fontSize: 9, fontWeight: 700, borderRadius: 2, padding: "3px 8px", letterSpacing: 1, textTransform: "uppercase", flexShrink: 0 }}>
+                              <div style={{ background: PL.accent, color: "#fff", fontSize: 9, fontWeight: 700, borderRadius: 999, padding: "5px 10px", letterSpacing: 1, textTransform: "uppercase", flexShrink: 0 }}>
                                 Abrir em {MESES[recMes]}
                               </div>
                             </div>
@@ -7914,7 +8108,7 @@ GAQ — Gerência de Aquisições`;
                                 { l: "Forecast", v: r.projecao, unit: "proj.", accent: true },
                                 { l: "Lead médio", v: r.avgLead || "—", unit: "d.u.", color: riskColor, bg: riskBg },
                               ].map((s, j) => (
-                                <div key={j} style={{ background: s.bg || PL.bg2, borderRadius: 2, padding: "8px 10px" }}>
+                                <div key={j} style={{ background: s.bg || PL.bg2, borderRadius: 16, padding: "10px 12px" }}>
                                   <div style={{ fontSize: 8, color: s.color || PL.ink3, textTransform: "uppercase", letterSpacing: 1, marginBottom: 3, fontWeight: 600 }}>{s.l}</div>
                                   <div style={{ fontSize: 20, fontWeight: 900, color: s.color || (s.accent ? PL.ink : PL.ink), letterSpacing: -1, fontVariantNumeric: "tabular-nums" }}>
                                     {s.v}<span style={{ fontSize: 9, fontWeight: 400, marginLeft: 2, opacity: .6 }}>{s.unit}</span>
@@ -7947,7 +8141,7 @@ GAQ — Gerência de Aquisições`;
                             <div key={i} onClick={() => setSelProc(r)} style={{ display: "grid", gridTemplateColumns: "90px 160px 1fr 80px", gap: 16, alignItems: "center", padding: "14px 0", borderBottom: `1px solid ${PL.line}`, cursor: "pointer", transition: "background .15s" }}
                               onMouseEnter={e => e.currentTarget.style.background = PL.bg}
                               onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                              <div style={{ background: diasBg, borderRadius: 2, padding: "6px 10px", textAlign: "center" }}>
+                              <div style={{ background: diasBg, borderRadius: 16, padding: "8px 10px", textAlign: "center" }}>
                                 <div style={{ fontSize: 18, fontWeight: 900, color: diasColor, letterSpacing: -1, lineHeight: 1 }}>{r.diasSD || 0}</div>
                                 <div style={{ fontSize: 8, color: diasColor, textTransform: "uppercase", letterSpacing: 1 }}>d.u. SD</div>
                               </div>
