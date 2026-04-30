@@ -636,6 +636,404 @@ function calcDelayProb(proc, phaseIntervals) {
   return Math.min(95, Math.max(5, prob));
 }
 
+/* ── Classificação SLA Global ───────────────────────────────────────────── */
+// Regra única para Visão Geral, Executivo, Timeline e Diagnóstico:
+// - Crítico: SLA vencido E entrega já vencida ou projeção já fora do cronograma.
+// - SLA Vencido: fora do SLA, mas ainda sem ruptura no cronograma de entrega.
+// - Atenção: próximo de entrar em crítico pela margem de SLA e/ou de entrega.
+// - SLA Atendido: dentro do SLA e sem pressão relevante de entrega.
+
+var SLA_SCORE_RULES = {
+  base: 1000,
+  critico: -30,
+  atencao: -15,
+  sla_vencido: -10,
+  sla_atendido: 30,
+  attentionThresholdDU: 20,
+  sdWorstCaseDU: PRAZO_LICITACAO,
+};
+
+function estimateRemainingBusinessDays(proc, phaseIntervals) {
+  if (!proc || !proc.emA) return null;
+
+  const hasRC = !!(proc.NumRC && String(proc.NumRC).trim() !== "");
+  const prazoModalidade = proc.prazoGeral || getPrazoGeral(nrm(proc.Modalidade || ""));
+
+  if (!hasRC) {
+    return {
+      total: SLA_SCORE_RULES.sdWorstCaseDU,
+      source: "sd_worst_case",
+      pairs: 0,
+      usedFallback: true,
+    };
+  }
+
+  const mod = proc.Modalidade || "N/I";
+  const modData = phaseIntervals?.byMod?.[mod] || {};
+  const globalData = phaseIntervals?.global || {};
+  const maxPredIdx = proc.isNonCPL ? IDX_ENVIO_PEDIDO : TL_COLS.length - 1;
+
+  let lastFilledIdx = -1;
+  for (let i = 0; i <= maxPredIdx; i++) {
+    if (pd(proc[TL_COLS[i][1]])) lastFilledIdx = i;
+  }
+
+  if (lastFilledIdx < 0) {
+    return {
+      total: Math.max(0, prazoModalidade - (proc.diasTotais || 0)),
+      source: "sla_restante",
+      pairs: 0,
+      usedFallback: true,
+    };
+  }
+
+  let total = 0;
+  let pairs = 0;
+  let pendingWithoutHistory = 0;
+
+  for (let i = lastFilledIdx; i < maxPredIdx; i++) {
+    const keyA = TL_COLS[i][1];
+    const keyB = TL_COLS[i + 1][1];
+    if (pd(proc[keyB])) continue;
+
+    const pair = keyA + "→" + keyB;
+    const sample = modData[pair] || globalData[pair];
+    const days = sample ? (sample.med || sample.avg || null) : null;
+
+    if (days != null) {
+      total += days;
+      pairs++;
+    } else {
+      pendingWithoutHistory++;
+    }
+  }
+
+  if (pendingWithoutHistory > 0) {
+    const remainingSla = Math.max(0, prazoModalidade - (proc.diasTotais || 0));
+    const fallbackPerStep = pendingWithoutHistory > 0 ? Math.max(1, Math.round(remainingSla / pendingWithoutHistory)) : 0;
+    total += fallbackPerStep * pendingWithoutHistory;
+  }
+
+  if (total <= 0) {
+    total = Math.max(0, prazoModalidade - (proc.diasTotais || 0));
+  }
+
+  return {
+    total: Math.max(0, Math.round(total)),
+    source: pairs > 0 ? "historico_fases" : "sla_restante",
+    pairs,
+    usedFallback: pendingWithoutHistory > 0,
+  };
+}
+
+function calcProcessSlaScore(sla) {
+  if (!sla) return null;
+  const points =
+    sla.bucket === "critico" ? SLA_SCORE_RULES.critico :
+    sla.bucket === "atencao" ? SLA_SCORE_RULES.atencao :
+    sla.bucket === "sla_vencido" ? SLA_SCORE_RULES.sla_vencido :
+    SLA_SCORE_RULES.sla_atendido;
+  return Math.max(0, Math.min(100, Math.round(((points + 30) / 60) * 100)));
+}
+
+function calcAreaSlaScore(rows, phaseIntervals) {
+  const classified = (rows || []).map(r => {
+    if (!r) return null;
+    return r._sla ? r : { ...r, _sla: calcSLAClassification(r, phaseIntervals) };
+  }).filter(r => r && r._sla);
+
+  const counts = { critico: 0, atencao: 0, sla_vencido: 0, no_prazo: 0 };
+  classified.forEach(r => {
+    if (counts[r._sla.bucket] == null) counts[r._sla.bucket] = 0;
+    counts[r._sla.bucket]++;
+  });
+
+  const ativos = classified.length;
+  if (!ativos) {
+    return {
+      score: 0,
+      raw: SLA_SCORE_RULES.base,
+      counts,
+      weights: SLA_SCORE_RULES,
+    };
+  }
+
+  const raw =
+    SLA_SCORE_RULES.base +
+    (counts.no_prazo * SLA_SCORE_RULES.sla_atendido) +
+    (counts.sla_vencido * SLA_SCORE_RULES.sla_vencido) +
+    (counts.atencao * SLA_SCORE_RULES.atencao) +
+    (counts.critico * SLA_SCORE_RULES.critico);
+
+  const minRaw = SLA_SCORE_RULES.base + (ativos * SLA_SCORE_RULES.critico);
+  const maxRaw = SLA_SCORE_RULES.base + (ativos * SLA_SCORE_RULES.sla_atendido);
+  const score = maxRaw === minRaw ? 100 : Math.round(((raw - minRaw) / (maxRaw - minRaw)) * 100);
+
+  return {
+    score: Math.max(0, Math.min(100, score)),
+    raw,
+    counts,
+    weights: SLA_SCORE_RULES,
+  };
+}
+
+function calcSLAClassification(proc, phaseIntervals, options) {
+  if (!proc || !proc.emA) return null;
+
+  options = options || {};
+  const attentionThresholdDU = options.attentionThresholdDU || SLA_SCORE_RULES.attentionThresholdDU;
+  const hasRC = !!(proc.NumRC && String(proc.NumRC).trim() !== "");
+  const slaPrazo = hasRC ? (proc.prazoGeral || getPrazoGeral(nrm(proc.Modalidade || ""))) : PRAZO_SD;
+  const diasConsumidos = hasRC ? (proc.diasTotais || 0) : (proc.diasSDAberto || proc.diasSD || 0);
+  const pctSLA = slaPrazo > 0 ? (diasConsumidos / slaPrazo) : 0;
+  const slaVencido = hasRC ? !!proc.atrasoGeral : !!proc.atrasoSD;
+
+  const projection = estimateRemainingBusinessDays(proc, phaseIntervals);
+  const diasRestantesProjetados = projection ? projection.total : (hasRC ? Math.max(0, slaPrazo - diasConsumidos) : SLA_SCORE_RULES.sdWorstCaseDU);
+
+  const temEntrega = !!proc.dataEntrega;
+  const diasEntregaUteis = temEntrega ? businessDaysFromTodaySigned(proc.dataEntrega) : null;
+  const entregaVencida = diasEntregaUteis != null && diasEntregaUteis < 0;
+  const margemEntregaDU = diasEntregaUteis == null ? null : (diasEntregaUteis - diasRestantesProjetados);
+  const projecaoForaCronograma = margemEntregaDU != null && margemEntregaDU < 0;
+  const margemSLADU = hasRC ? (slaPrazo - (diasConsumidos + diasRestantesProjetados)) : null;
+  const janelaComprometida = !hasRC ? false : (margemEntregaDU != null && margemEntregaDU >= 0 && margemEntregaDU <= attentionThresholdDU);
+  const atencaoPrazo = !hasRC ? false : (margemSLADU != null && margemSLADU >= 0 && margemSLADU <= attentionThresholdDU);
+  const atencaoEntrega = !hasRC ? false : (
+    entregaVencida ||
+    projecaoForaCronograma ||
+    janelaComprometida ||
+    (diasEntregaUteis != null && diasEntregaUteis >= 0 && diasEntregaUteis <= attentionThresholdDU)
+  );
+
+  let bucket = "no_prazo";
+  let detail = "Dentro do SLA e sem pressão relevante de entrega.";
+
+  if (slaVencido && (entregaVencida || projecaoForaCronograma)) {
+    bucket = "critico";
+    detail = entregaVencida
+      ? "SLA vencido e entrega já vencida."
+      : "SLA vencido e projeção já fora do cronograma de entrega.";
+  } else if (slaVencido) {
+    bucket = "sla_vencido";
+    detail = hasRC
+      ? "Fora do SLA da modalidade, mas ainda dentro do cronograma de entrega."
+      : "SD acima de 10 d.u., mas ainda sem ruptura de entrega pelo cenário de 90 d.u.";
+  } else if (!hasRC) {
+    bucket = "no_prazo";
+    detail = "SD dentro do prazo de 10 d.u.";
+  } else if (atencaoPrazo || atencaoEntrega) {
+    bucket = "atencao";
+    if (projecaoForaCronograma) detail = "Projeção de entrega já pressionada pelo ritmo atual.";
+    else if (janelaComprometida) detail = `Margem de entrega em até ${attentionThresholdDU} d.u.`;
+    else if (atencaoPrazo) detail = `Margem de SLA em até ${attentionThresholdDU} d.u.`;
+    else detail = `Entrega prevista em até ${attentionThresholdDU} d.u.`;
+  }
+
+  const visual = bucket === "critico"
+    ? { color: "#d35400", bg: "#fff3e8", label: "Crítico", rank: 4 }
+    : bucket === "atencao"
+      ? { color: "#ff9500", bg: "#fff7e6", label: "Atenção", rank: 3 }
+      : bucket === "sla_vencido"
+        ? { color: "#ff3b30", bg: "#fff5f5", label: "SLA Vencido", rank: 2 }
+        : { color: "#34c759", bg: "#eafaf1", label: "SLA Atendido", rank: 1 };
+
+  const procScore = calcProcessSlaScore({ bucket });
+
+  return {
+    bucket,
+    label: visual.label,
+    rank: visual.rank,
+    color: visual.color,
+    bg: visual.bg,
+    detail,
+    slaVencido,
+    temEntrega,
+    entregaVencida,
+    projecaoForaCronograma,
+    janelaComprometida,
+    atencaoPrazo,
+    atencaoEntrega,
+    pctSLA,
+    pctSLALabel: Math.round(pctSLA * 100),
+    slaPrazo,
+    diasConsumidos,
+    diasRestantesProjetados,
+    diasEntregaUteis,
+    diasParaEntrega: proc.diasParaEntrega,
+    margemEntregaDU,
+    margemSLADU,
+    attentionThresholdDU,
+    hasRC,
+    sdWorstCaseDU: !hasRC ? SLA_SCORE_RULES.sdWorstCaseDU : null,
+    projection,
+    processScore: procScore,
+  };
+}
+
+// Labels e cores padronizadas para uso global
+var SLA_BUCKETS = {
+  critico:     { label: "Crítico",       color: "#d35400", bg: "#fff3e8" },
+  atencao:     { label: "Atenção",       color: "#ff9500", bg: "#fff7e6" },
+  sla_vencido: { label: "SLA Vencido",   color: "#ff3b30", bg: "#fff5f5" },
+  no_prazo:    { label: "SLA Atendido",  color: "#34c759", bg: "#eafaf1" },
+};
+
+// Overrides da regua global de SLA/entrega.
+function calcProcessSlaScore(sla) {
+  if (!sla) return null;
+  const points =
+    sla.bucket === "critico" ? SLA_SCORE_RULES.critico :
+    sla.bucket === "atencao" ? SLA_SCORE_RULES.atencao :
+    sla.bucket === "sla_vencido" ? SLA_SCORE_RULES.sla_vencido :
+    SLA_SCORE_RULES.sla_atendido;
+  const minPoints = SLA_SCORE_RULES.critico;
+  const maxPoints = SLA_SCORE_RULES.sla_atendido;
+  return Math.max(0, Math.min(100, Math.round(((points - minPoints) / (maxPoints - minPoints)) * 100)));
+}
+
+function calcAreaSlaScore(rows, phaseIntervals) {
+  const classificados = (rows || []).map(r => {
+    if (!r) return null;
+    return r._sla ? r : { ...r, _sla: calcSLAClassification(r, phaseIntervals) };
+  }).filter(r => r && r._sla);
+
+  const counts = { critico: 0, atencao: 0, sla_vencido: 0, no_prazo: 0 };
+  classificados.forEach(r => {
+    if (counts[r._sla.bucket] == null) counts[r._sla.bucket] = 0;
+    counts[r._sla.bucket]++;
+  });
+
+  const ativos = classificados.length;
+  if (!ativos) {
+    return {
+      score: 0,
+      raw: SLA_SCORE_RULES.base,
+      counts,
+      weights: SLA_SCORE_RULES,
+      detail: "Sem processos ativos no recorte.",
+    };
+  }
+
+  const raw =
+    SLA_SCORE_RULES.base +
+    (counts.no_prazo * SLA_SCORE_RULES.sla_atendido) +
+    (counts.sla_vencido * SLA_SCORE_RULES.sla_vencido) +
+    (counts.atencao * SLA_SCORE_RULES.atencao) +
+    (counts.critico * SLA_SCORE_RULES.critico);
+
+  const minRaw = SLA_SCORE_RULES.base + (ativos * SLA_SCORE_RULES.critico);
+  const maxRaw = SLA_SCORE_RULES.base + (ativos * SLA_SCORE_RULES.sla_atendido);
+  const score = maxRaw === minRaw ? 100 : Math.round(((raw - minRaw) / (maxRaw - minRaw)) * 100);
+
+  return {
+    score: Math.max(0, Math.min(100, score)),
+    raw,
+    counts,
+    weights: SLA_SCORE_RULES,
+    detail: `Base 1000 + ${counts.no_prazo}x(${SLA_SCORE_RULES.sla_atendido}) + ${counts.sla_vencido}x(${SLA_SCORE_RULES.sla_vencido}) + ${counts.atencao}x(${SLA_SCORE_RULES.atencao}) + ${counts.critico}x(${SLA_SCORE_RULES.critico})`,
+  };
+}
+
+function calcSLAClassification(proc, phaseIntervals, options) {
+  if (!proc || !proc.emA) return null;
+
+  options = options || {};
+  const attentionThresholdDU = options.attentionThresholdDU || SLA_SCORE_RULES.attentionThresholdDU;
+  const hasRC = !!(proc.NumRC && String(proc.NumRC).trim() !== "");
+  const slaPrazo = hasRC ? (proc.prazoGeral || getPrazoGeral(nrm(proc.Modalidade || ""))) : PRAZO_SD;
+  const diasConsumidos = hasRC ? (proc.diasTotais || 0) : (proc.diasSDAberto || proc.diasSD || 0);
+  const pctSLA = slaPrazo > 0 ? (diasConsumidos / slaPrazo) : 0;
+  const slaVencido = hasRC ? !!proc.atrasoGeral : !!proc.atrasoSD;
+  const projection = estimateRemainingBusinessDays(proc, phaseIntervals);
+  const diasRestantesProjetados = projection ? projection.total : (hasRC ? Math.max(0, slaPrazo - diasConsumidos) : SLA_SCORE_RULES.sdWorstCaseDU);
+  const temEntrega = !!proc.dataEntrega;
+  const diasEntregaUteis = temEntrega ? businessDaysFromTodaySigned(proc.dataEntrega) : null;
+  const entregaVencida = diasEntregaUteis != null && diasEntregaUteis < 0;
+  const margemEntregaDU = diasEntregaUteis == null ? null : (diasEntregaUteis - diasRestantesProjetados);
+  const projecaoForaCronograma = margemEntregaDU != null && margemEntregaDU < 0;
+  const margemSLADU = hasRC ? (slaPrazo - (diasConsumidos + diasRestantesProjetados)) : null;
+  const projecaoEstouraSla = !hasRC ? false : (margemSLADU != null && margemSLADU < 0);
+  const janelaComprometida = !hasRC ? false : (margemEntregaDU != null && margemEntregaDU <= attentionThresholdDU);
+  const atencaoPrazo = !hasRC ? false : (margemSLADU != null && margemSLADU <= attentionThresholdDU);
+  const atencaoEntrega = !hasRC ? false : (margemEntregaDU != null && margemEntregaDU <= attentionThresholdDU);
+  const entregaProxima = !hasRC ? false : (diasEntregaUteis != null && diasEntregaUteis >= 0 && diasEntregaUteis <= attentionThresholdDU);
+
+  let bucket = "no_prazo";
+  let detail = temEntrega ? "Dentro do SLA e do cronograma de entrega." : "Dentro do SLA atual.";
+
+  if (slaVencido && (entregaVencida || projecaoForaCronograma)) {
+    bucket = "critico";
+    detail = entregaVencida
+      ? "SLA vencido e entrega ja vencida."
+      : "SLA vencido e projecao de conclusao fora do cronograma de entrega.";
+  } else if (slaVencido) {
+    bucket = "sla_vencido";
+    detail = hasRC
+      ? "Fora do SLA da modalidade, mas ainda dentro do cronograma de entrega."
+      : "SD acima de 10 d.u.; entrega avaliada no pior cenario de 90 d.u.";
+  } else if (!hasRC) {
+    bucket = "no_prazo";
+    detail = "SD dentro do prazo de 10 d.u.";
+  } else if (atencaoPrazo || atencaoEntrega || projecaoEstouraSla) {
+    bucket = "atencao";
+    if (projecaoEstouraSla && atencaoEntrega) detail = `Margem curta para SLA e entrega (ate ${attentionThresholdDU} d.u.).`;
+    else if (projecaoEstouraSla) detail = "Ritmo atual projeta ruptura do SLA antes da conclusao.";
+    else if (margemEntregaDU != null && margemEntregaDU < 0) detail = "Entrega pressionada: projecao de conclusao acima da data prevista.";
+    else if (janelaComprometida && atencaoPrazo) detail = `Margem curta para SLA e entrega (ate ${attentionThresholdDU} d.u.).`;
+    else if (janelaComprometida) detail = `Margem de entrega em ate ${attentionThresholdDU} d.u.`;
+    else detail = `Margem de SLA em ate ${attentionThresholdDU} d.u.`;
+  }
+
+  const visual = bucket === "critico"
+    ? { color: "#d35400", bg: "#fff3e8", label: "Crítico", rank: 4 }
+    : bucket === "atencao"
+      ? { color: "#ff9500", bg: "#fff7e6", label: "Atenção", rank: 3 }
+      : bucket === "sla_vencido"
+        ? { color: "#ff3b30", bg: "#fff5f5", label: "SLA Vencido", rank: 2 }
+        : { color: "#34c759", bg: "#eafaf1", label: "SLA Atendido", rank: 1 };
+
+  return {
+    bucket,
+    label: visual.label,
+    rank: visual.rank,
+    color: visual.color,
+    bg: visual.bg,
+    detail,
+    slaVencido,
+    temEntrega,
+    entregaVencida,
+    projecaoForaCronograma,
+    projecaoEstouraSla,
+    janelaComprometida,
+    atencaoPrazo,
+    atencaoEntrega,
+    entregaProxima,
+    pctSLA,
+    pctSLALabel: Math.round(pctSLA * 100),
+    prazo: slaPrazo,
+    slaPrazo,
+    diasConsumidos,
+    diasRestantesProjetados,
+    diasEntregaUteis,
+    diasParaEntrega: proc.diasParaEntrega,
+    margemEntregaDU,
+    margemSLADU,
+    attentionThresholdDU,
+    hasRC,
+    sdWorstCaseDU: !hasRC ? SLA_SCORE_RULES.sdWorstCaseDU : null,
+    projection,
+    processScore: calcProcessSlaScore({ bucket }),
+  };
+}
+
+SLA_BUCKETS = {
+  critico:     { label: "Crítico",      color: "#d35400", bg: "#fff3e8" },
+  atencao:     { label: "Atenção",      color: "#ff9500", bg: "#fff7e6" },
+  sla_vencido: { label: "SLA Vencido",  color: "#ff3b30", bg: "#fff5f5" },
+  no_prazo:    { label: "SLA Atendido", color: "#34c759", bg: "#eafaf1" },
+};
+
 function calcDirectorPriority(proc) {
   if (!proc || !proc.emA || !proc.NumRC) return null;
 
