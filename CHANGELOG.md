@@ -36,3 +36,18 @@
   - `tags.js`
   - `dados.json`
   - `tags.json`
+
+### Admin Master e Qualidade de Dados
+- Criacao do perfil `Admin Master`, com acesso total a base e destaque para a aba de qualidade.
+- Inclusao da aba `Qualidade de Dados` com leitura aberta dos problemas de cadastro e integridade da base.
+- Novo painel com cards de `Processos avaliados`, `Com pendencia`, `Erros criticos`, `Alertas de cadastro` e `Score da base`.
+- Regras monitoradas com drill-down para:
+  - `Datas incoerentes`
+  - `RC sem recebimento`
+  - `RC duplicada`
+  - `Ativo sem responsavel`
+  - `RC sem modalidade`
+  - `Ativo com RC sem entrega`
+  - `CPL sem responsavel`
+  - `Ticket SD duplicado`
+- Inclusao de leitura de pressao por subarea e exemplos prioritarios para triagem da base.

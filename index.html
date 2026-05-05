@@ -280,6 +280,8 @@ const DrillDownPanel = ({
     ? "ao Operacional"
     : sourceAba === "gestao"
       ? "ao Painel de Gestao"
+      : sourceAba === "qualidade"
+        ? "a Qualidade de Dados"
       : sourceAba === "executivo"
         ? "ao Executivo"
         : "a Visao Geral";
@@ -1169,6 +1171,9 @@ function App() {
   const [loginUser, setLoginUser] = useState(() => {
     try { const u = sessionStorage.getItem("painel_login_user"); return (u && u !== "") ? u : null; } catch { return null; }
   });
+  const [loginMaster, setLoginMaster] = useState(() => {
+    try { const m = sessionStorage.getItem("painel_login_master"); return m ? JSON.parse(m) : null; } catch { return null; }
+  });
   const [loginArea, setLoginArea] = useState(() => {
     try { const a = sessionStorage.getItem("painel_login_area"); return (a && a !== "") ? a : null; } catch { return null; }
   });
@@ -1189,15 +1194,35 @@ function App() {
   const [dirShowSDList, setDirShowSDList] = useState(false);
   const [dirTLDrill, setDirTLDrill] = useState(null); // { title, procs } — drill-down da timeline
   const isDiretor = !!loginDiretor;
+  const isAdminMaster = !!loginMaster;
 
   function handleLogin() {
-    if (Object.prototype.hasOwnProperty.call(PERFIS_ACESSO, loginInput)) {
+    if (typeof ADMIN_MASTER_PERFIS !== "undefined" && Object.prototype.hasOwnProperty.call(ADMIN_MASTER_PERFIS, loginInput)) {
+      const master = ADMIN_MASTER_PERFIS[loginInput];
+      try {
+        sessionStorage.setItem("painel_login_ok", "1");
+        sessionStorage.setItem("painel_login_master", JSON.stringify(master));
+        sessionStorage.setItem("painel_login_user", "");
+        sessionStorage.setItem("painel_login_area", "");
+        sessionStorage.removeItem("painel_login_diretor");
+      } catch {}
+      setLoginMaster(master);
+      setLoginUser(null);
+      setLoginArea(null);
+      setLoginDiretor(null);
+      setLoginOk(true);
+      setLoginErroMsg(false);
+      setLoginInput("");
+      if (base.length > 0) setAba("qualidade");
+    } else if (Object.prototype.hasOwnProperty.call(PERFIS_ACESSO, loginInput)) {
       const user = PERFIS_ACESSO[loginInput];
       try {
         sessionStorage.setItem("painel_login_ok", "1");
         sessionStorage.setItem("painel_login_user", user || "");
+        sessionStorage.removeItem("painel_login_master");
         sessionStorage.removeItem("painel_login_diretor");
       } catch {}
+      setLoginMaster(null);
       setLoginUser(user);
       setLoginDiretor(null);
       setLoginOk(true);
@@ -1217,9 +1242,11 @@ function App() {
         sessionStorage.setItem("painel_login_ok", "1");
         sessionStorage.setItem("painel_login_area", area || "");
         sessionStorage.setItem("painel_login_user", "");
+        sessionStorage.removeItem("painel_login_master");
         sessionStorage.removeItem("painel_login_diretor");
       } catch {}
       setLoginArea(area);
+      setLoginMaster(null);
       setLoginUser(null);
       setLoginDiretor(null);
       setLoginOk(true);
@@ -1241,10 +1268,12 @@ function App() {
         sessionStorage.setItem("painel_login_diretor", JSON.stringify(cfg));
         sessionStorage.setItem("painel_login_user", "");
         sessionStorage.setItem("painel_login_area", "");
+        sessionStorage.removeItem("painel_login_master");
         // Persistir senha no localStorage para auto-login futuro (só nesta máquina/navegador)
         localStorage.setItem("painel_diretor_remember", senha);
       } catch {}
       setLoginDiretor(cfg);
+      setLoginMaster(null);
       setLoginUser(null);
       setLoginArea(null);
       setLoginOk(true);
@@ -1259,8 +1288,9 @@ function App() {
 
   function handleLogout() {
     if (!window.confirm("Deseja realmente sair do sistema?")) return;
-    try { sessionStorage.removeItem("painel_login_ok"); sessionStorage.removeItem("painel_login_user"); sessionStorage.removeItem("painel_login_area"); sessionStorage.removeItem("painel_login_diretor"); localStorage.removeItem("painel_diretor_remember"); } catch {}
+    try { sessionStorage.removeItem("painel_login_ok"); sessionStorage.removeItem("painel_login_user"); sessionStorage.removeItem("painel_login_area"); sessionStorage.removeItem("painel_login_master"); sessionStorage.removeItem("painel_login_diretor"); localStorage.removeItem("painel_diretor_remember"); } catch {}
     setLoginOk(false);
+    setLoginMaster(null);
     setLoginUser(null);
     setLoginArea(null);
     setLoginDiretor(null);
@@ -2885,6 +2915,169 @@ const topModLentas = (() => {
     };
   }, [base, fBase, fBack, phaseIntervals]);
 
+  const qualityData = useMemo(() => {
+    if (!base.length) return null;
+
+    const rows = fBase;
+    const rowKey = (r) => r ? (r.ProcessKey || `${r.NumRC || ""}|${r.TicketSD || ""}|${r.Objeto || ""}`) : "";
+    const addDecor = (list, issueKey, detailFn) => list.map(r => ({
+      ...r,
+      _dqIssue: issueKey,
+      _dqDetail: typeof detailFn === "function" ? detailFn(r) : detailFn,
+    }));
+    const uniqRows = (list) => {
+      const seen = new Set();
+      return (list || []).filter(r => {
+        const key = rowKey(r);
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+
+    const duplicateRows = (field) => {
+      const groups = {};
+      rows.forEach(r => {
+        const raw = (r[field] || "").toString().trim();
+        if (!raw) return;
+        if (!groups[raw]) groups[raw] = [];
+        groups[raw].push(r);
+      });
+      return Object.entries(groups)
+        .filter(([, list]) => list.length > 1)
+        .flatMap(([value, list]) => addDecor(list, `dup_${field}`, () => `${field}: ${value}`));
+    };
+
+    const dateOrderIssues = rows.flatMap(r => {
+      const modNrm = nrm(r.Modalidade || "");
+      const idxs = r.NumRC ? getTLColsForMod(modNrm) : [0, 1, 2];
+      let prevDate = null;
+      let prevLabel = "";
+      for (const idx of idxs) {
+        const [label, key] = TL_COLS[idx] || [];
+        if (!key) continue;
+        const current = pd(r[key]);
+        if (!current) continue;
+        if (prevDate && current < prevDate) {
+          return [{
+            ...r,
+            _dqIssue: "datas_incoerentes",
+            _dqDetail: `${label}: ${current.toLocaleDateString("pt-BR")} antes de ${prevLabel}: ${prevDate.toLocaleDateString("pt-BR")}`,
+          }];
+        }
+        prevDate = current;
+        prevLabel = label;
+      }
+      return [];
+    });
+
+    const issueDefs = [
+      {
+        key: "datas_incoerentes",
+        label: "Datas incoerentes",
+        severity: "critical",
+        color: "#d35400",
+        desc: "Etapa posterior com data anterior a uma etapa já registada no processo.",
+        rows: dateOrderIssues,
+      },
+      {
+        key: "rc_sem_recebimento",
+        label: "RC sem recebimento",
+        severity: "critical",
+        color: "#c0392b",
+        desc: "Processos com RC aberta, mas sem data de recebimento da RC.",
+        rows: addDecor(rows.filter(r => r.NumRC && !r.aberturaRC), "rc_sem_recebimento", "RC sem data de recebimento."),
+      },
+      {
+        key: "duplicidade_rc",
+        label: "RC duplicada",
+        severity: "critical",
+        color: "#e74c3c",
+        desc: "Mesmo número de RC encontrado em mais de um registo do recorte.",
+        rows: duplicateRows("NumRC"),
+      },
+      {
+        key: "ativo_sem_responsavel",
+        label: "Ativo sem responsável",
+        severity: "critical",
+        color: "#ff3b30",
+        desc: "Processos em andamento sem responsável activo definido.",
+        rows: addDecor(rows.filter(r => r.emA && (!r.respAtivo || r.respAtivo === "—" || r.respAtivo === "N/A")), "ativo_sem_responsavel", "Processo activo sem responsável da etapa."),
+      },
+      {
+        key: "rc_sem_modalidade",
+        label: "RC sem modalidade",
+        severity: "attention",
+        color: "#ff9500",
+        desc: "RCs sem modalidade impedem SLA e cronograma correctos.",
+        rows: addDecor(rows.filter(r => r.NumRC && !(r.Modalidade || "").toString().trim()), "rc_sem_modalidade", "RC sem modalidade informada."),
+      },
+      {
+        key: "ativo_sem_entrega",
+        label: "Ativo com RC sem entrega",
+        severity: "attention",
+        color: "#f39c12",
+        desc: "Processos em andamento com RC, mas sem data prevista de entrega/início.",
+        rows: addDecor(rows.filter(r => r.emA && r.NumRC && !r.dataEntrega), "ativo_sem_entrega", "Sem data de entrega prevista."),
+      },
+      {
+        key: "cpl_sem_responsavel",
+        label: "CPL sem responsável",
+        severity: "attention",
+        color: "#9b59b6",
+        desc: "Processos com fluxo CPL sem responsável CPL ou pregoeiro preenchido.",
+        rows: addDecor(rows.filter(r => r.emA && r.ehCPL && !(r.cplResp || r.Pregoeiro)), "cpl_sem_responsavel", "Fluxo CPL sem responsável identificado."),
+      },
+      {
+        key: "duplicidade_sd",
+        label: "Ticket SD duplicado",
+        severity: "attention",
+        color: "#5dade2",
+        desc: "Mesmo ticket SD encontrado em mais de um registo do recorte.",
+        rows: duplicateRows("TicketSD"),
+      },
+    ].map(issue => ({ ...issue, rows: uniqRows(issue.rows), count: uniqRows(issue.rows).length }));
+
+    const allIssueRows = uniqRows(issueDefs.flatMap(issue => issue.rows));
+    const criticalRows = uniqRows(issueDefs.filter(issue => issue.severity === "critical").flatMap(issue => issue.rows));
+    const attentionRows = uniqRows(issueDefs.filter(issue => issue.severity === "attention").flatMap(issue => issue.rows));
+
+    const bySubarea = ["NCL", "CPL", "Scont", "Sem subárea"].map(label => {
+      const match = label === "Sem subárea"
+        ? allIssueRows.filter(r => !r.faseSubarea)
+        : allIssueRows.filter(r => r.faseSubarea === label);
+      const totalSub = label === "Sem subárea"
+        ? rows.filter(r => !r.faseSubarea).length
+        : rows.filter(r => r.faseSubarea === label).length;
+      return {
+        label,
+        count: match.length,
+        total: totalSub,
+        pct: totalSub ? Math.round((match.length / totalSub) * 100) : 0,
+        rows: match,
+      };
+    }).filter(item => item.total > 0);
+
+    const maxPenalty = Math.max(rows.length * 6, 1);
+    const appliedPenalty = (criticalRows.length * 6) + (attentionRows.length * 3);
+    const score = Math.max(0, Math.min(100, Math.round(100 - ((appliedPenalty / maxPenalty) * 100))));
+
+    return {
+      totalRows: rows.length,
+      activeRows: fBack.length,
+      issueDefs,
+      allIssueRows,
+      criticalRows,
+      attentionRows,
+      totalIssues: allIssueRows.length,
+      criticalCount: criticalRows.length,
+      attentionCount: attentionRows.length,
+      score,
+      bySubarea,
+      topExamples: allIssueRows.slice(0, 12),
+    };
+  }, [base, fBase, fBack]);
+
   const allProcesses = useMemo(() => {
     let arr = [...fBase];
     const { col, dir } = sortAll;
@@ -2999,6 +3192,7 @@ const topModLentas = (() => {
     ]},
   ] : [
     { label: "Visão", items: [
+      ...(isAdminMaster ? [["qualidade","settings","Qualidade de Dados",qualityData ? qualityData.totalIssues : 0]] : []),
       ["overview","grid","Visão Geral",null],
       ["executivo","spark","Executivo",null],
       ["operacional","chart","Operacional",null],
@@ -3024,7 +3218,7 @@ const topModLentas = (() => {
 
   // Tab title map
   const tabTitles = {
-    upload: "Upload", overview: "Visão Geral", executivo: "Executivo", operacional: "Operacional",
+    upload: "Upload", overview: "Visão Geral", executivo: "Executivo", operacional: "Operacional", qualidade: "Qualidade de Dados",
     processos: "Processos", metro: "Linha do Metrô", dirTimeline: "Timeline", cronograma: "Cronograma",
     alertas: "Alertas", alertaSD: "Alerta SD", alertaRC: "Alerta RC", mapeamento: "Mapeamento",
     gestao: "Performance", planejamento: "Planejamento", pantanal: "Pantanal", nova: "Nova Demanda",
@@ -3071,6 +3265,7 @@ const topModLentas = (() => {
                     className="gaq-input"
                     style={{ width: "100%", padding: "12px 14px", height: 44, fontSize: 15, borderColor: loginErroMsg ? "var(--gaq-red)" : undefined }}
                   />
+                  <div style={{ fontSize: 11, color: "var(--gaq-text-3)", marginTop: 6 }}>Admin, compradores e Admin Master usam este acesso.</div>
                   {loginErroMsg && <div style={{ fontSize: 12, color: "var(--gaq-red)", marginTop: 6, fontWeight: 600 }}>Senha incorreta. Tente novamente.</div>}
                 </div>
                 <button onClick={handleLogin} className="gaq-btn is-primary"
@@ -3200,10 +3395,10 @@ const topModLentas = (() => {
         }}>
           <div style={{
             width: 30, height: 30, borderRadius: "50%",
-            background: isDiretor ? "linear-gradient(135deg,#34c759,#148f77)" : loginArea ? "linear-gradient(135deg,#af52de,#8e44ad)" : "linear-gradient(135deg,#0071e3,#5e5ce6)",
+            background: isDiretor ? "linear-gradient(135deg,#34c759,#148f77)" : loginArea ? "linear-gradient(135deg,#af52de,#8e44ad)" : isAdminMaster ? "linear-gradient(135deg,#f59e0b,#d97706)" : "linear-gradient(135deg,#0071e3,#5e5ce6)",
             color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
             fontWeight: 600, fontSize: 12, flexShrink: 0,
-          }}>{isDiretor ? "D" : loginArea ? "A" : loginUser ? loginUser.charAt(0).toUpperCase() : "G"}</div>
+          }}>{isDiretor ? "D" : loginArea ? "A" : isAdminMaster ? "M" : loginUser ? loginUser.charAt(0).toUpperCase() : "G"}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--gaq-text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {isDiretor ? loginDiretor.nome : loginArea ? `Área: ${loginArea}` : loginUser ? loginUser : "GAQ Admin"}
@@ -3211,6 +3406,7 @@ const topModLentas = (() => {
             <div style={{ fontSize: 11, color: "var(--gaq-text-3)" }}>
               {isDiretor ? "Diretoria" : loginArea ? "Perfil Área" : loginUser ? "Comprador" : "Administrador"}
             </div>
+            {isAdminMaster && <div style={{ fontSize: 10, color: "#d97706", fontWeight: 700 }}>Qualidade de Dados liberada</div>}
           </div>
           <button className="gaq-icon-btn" title="Sair" onClick={handleLogout}><Icon name="logout" size={15}/></button>
         </div>
@@ -4876,6 +5072,145 @@ const topModLentas = (() => {
             </>
         )}
 
+        {/* ════════════ ABA: QUALIDADE DE DADOS ════════════ */}
+        {aba === "qualidade" && isAdminMaster && (qualityData ? <div>
+          {drillDown && drillDown.sourceAba === "qualidade" ? <DrillDownPanel
+            drillDown={drillDown}
+            defaultSourceAba="qualidade"
+            setDrillDown={setDrillDown}
+            setAba={setAba}
+            setSelProc={setSelProc}
+            pgDrillDown={pgDrillDown}
+            pgDrillDownSz={pgDrillDownSz}
+            setPgDrillDown={setPgDrillDown}
+            setPgDrillDownSz={setPgDrillDownSz}
+            phaseIntervals={phaseIntervals}
+          /> : <>
+            <div style={{ background: "linear-gradient(135deg, #1f2937 0%, #0f172a 45%, #1d4ed8 100%)", borderRadius: "var(--gaq-r-xl)", padding: "26px 30px", marginBottom: 18, color: "#fff", boxShadow: "var(--gaq-shadow-2)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+                <div>
+                  <div className="gaq-eyebrow" style={{ color: "rgba(255,255,255,0.68)", marginBottom: 8 }}>Admin Master · Qualidade de Dados</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: "-0.03em", marginBottom: 6 }}>Painel de Qualidade da Base</div>
+                  <div style={{ fontSize: 13, color: "rgba(255,255,255,0.76)", maxWidth: 780, lineHeight: 1.55 }}>
+                    Monitoriza campos críticos, duplicidades e incoerências de datas para reduzir erros de leitura, cronograma e SLA em todo o sistema.
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(110px, 1fr))", gap: 10, minWidth: 250 }}>
+                  {[
+                    { label: "Registos", value: qualityData.totalRows, color: "#bfdbfe" },
+                    { label: "Pendências", value: qualityData.totalIssues, color: "#fed7aa" },
+                    { label: "Críticas", value: qualityData.criticalCount, color: "#fecaca" },
+                    { label: "Score", value: qualityData.score, color: "#bbf7d0" },
+                  ].map(item => (
+                    <div key={item.label} style={{ background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 18, padding: "14px 16px" }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", color: "rgba(255,255,255,0.64)", marginBottom: 4 }}>{item.label}</div>
+                      <div className="gaq-num" style={{ fontSize: 24, fontWeight: 800, color: item.color }}>{item.value.toLocaleString ? item.value.toLocaleString("pt-BR") : item.value}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 18 }}>
+              {[
+                { label: "Processos avaliados", value: qualityData.totalRows, color: "#1f6feb", data: fBase, title: "Qualidade — Processos avaliados" },
+                { label: "Com pendência", value: qualityData.totalIssues, color: "#ea580c", data: qualityData.allIssueRows, title: "Qualidade — Processos com pendência" },
+                { label: "Erros críticos", value: qualityData.criticalCount, color: "#dc2626", data: qualityData.criticalRows, title: "Qualidade — Erros críticos" },
+                { label: "Alertas de cadastro", value: qualityData.attentionCount, color: "#f59e0b", data: qualityData.attentionRows, title: "Qualidade — Alertas de cadastro" },
+                { label: "Score da base", value: qualityData.score, color: qualityData.score >= 85 ? "#16a34a" : qualityData.score >= 70 ? "#f59e0b" : "#dc2626", data: qualityData.allIssueRows, title: "Qualidade — Base classificada" },
+              ].map(card => (
+                <div key={card.label} onClick={() => setDrillDown({ title: card.title, data: card.data, color: card.color, sourceAba: "qualidade" })}
+                  className="gaq-card" style={{ padding: 18, borderRadius: 22, cursor: "pointer" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--gaq-text-3)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>{card.label}</div>
+                  <div className="gaq-num" style={{ fontSize: 30, fontWeight: 800, color: card.color }}>{card.value.toLocaleString ? card.value.toLocaleString("pt-BR") : card.value}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.3fr) minmax(0, 1fr)", gap: 18, marginBottom: 18 }}>
+              <div className="gaq-card" style={{ padding: 22 }}>
+                <div className="gaq-section-h">
+                  <div>
+                    <div className="gaq-h3">Regras monitoradas</div>
+                    <div className="sub">Clique numa regra para ver os processos afectados.</div>
+                  </div>
+                </div>
+                <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
+                  {qualityData.issueDefs.map(issue => (
+                    <button
+                      key={issue.key}
+                      onClick={() => setDrillDown({ title: `Qualidade — ${issue.label}`, data: issue.rows, color: issue.color, sourceAba: "qualidade" })}
+                      style={{ textAlign: "left", border: `1px solid ${issue.color}22`, borderLeft: `4px solid ${issue.color}`, background: issue.count ? `${issue.color}10` : "var(--gaq-bg-2)", borderRadius: 18, padding: "14px 16px", cursor: issue.count ? "pointer" : "default", opacity: issue.count ? 1 : 0.72 }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 6 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--gaq-text)" }}>{issue.label}</div>
+                        <div className="gaq-num" style={{ fontSize: 22, fontWeight: 800, color: issue.color }}>{issue.count}</div>
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--gaq-text-2)", lineHeight: 1.5 }}>{issue.desc}</div>
+                      <div style={{ fontSize: 10, color: issue.color, fontWeight: 700, textTransform: "uppercase", marginTop: 8 }}>
+                        {issue.severity === "critical" ? "Erro crítico" : "Alerta de cadastro"}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="gaq-card" style={{ padding: 22 }}>
+                <div className="gaq-section-h">
+                  <div>
+                    <div className="gaq-h3">Pressão por subárea</div>
+                    <div className="sub">Percentual do recorte com pendências por subárea actual.</div>
+                  </div>
+                </div>
+                <div style={{ display: "grid", gap: 12, marginTop: 8 }}>
+                  {qualityData.bySubarea.map(item => (
+                    <div key={item.label}
+                      onClick={() => setDrillDown({ title: `Qualidade — ${item.label}`, data: item.rows, color: item.pct >= 40 ? "#dc2626" : item.pct >= 20 ? "#f59e0b" : "#16a34a", sourceAba: "qualidade" })}
+                      style={{ cursor: "pointer" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--gaq-text)" }}>{item.label}</span>
+                        <span className="gaq-meta gaq-num">{item.count}/{item.total} · {item.pct}%</span>
+                      </div>
+                      <div style={{ height: 10, background: "rgba(15,23,42,0.06)", borderRadius: 999, overflow: "hidden" }}>
+                        <div style={{ width: `${Math.max(item.pct, item.count > 0 ? 6 : 0)}%`, height: "100%", background: item.pct >= 40 ? "#dc2626" : item.pct >= 20 ? "#f59e0b" : "#16a34a", borderRadius: 999 }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="gaq-card" style={{ padding: 22 }}>
+              <div className="gaq-section-h">
+                <div>
+                  <div className="gaq-h3">Exemplos prioritários</div>
+                  <div className="sub">Primeiros processos afectados para triagem rápida da base.</div>
+                </div>
+                <button className="gaq-btn is-ghost" style={{ fontSize: 12 }} onClick={() => setDrillDown({ title: "Qualidade — Todos os processos com pendência", data: qualityData.allIssueRows, color: "#ea580c", sourceAba: "qualidade" })}>
+                  Ver todos <Icon name="chevR" size={12}/>
+                </button>
+              </div>
+              {qualityData.topExamples.length === 0
+                ? <div style={{ color: "var(--gaq-text-3)", fontSize: 13, paddingTop: 8 }}>Nenhuma pendência identificada no recorte actual.</div>
+                : qualityData.topExamples.map((r, idx) => (
+                  <div key={`${r.ProcessKey || idx}-dq`} onClick={() => setSelProc(r)}
+                    style={{ display: "grid", gridTemplateColumns: "34px 130px 1fr 140px 26px", gap: 12, alignItems: "center", padding: "12px 0", borderTop: idx ? "1px solid var(--gaq-line)" : "none", cursor: "pointer" }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "var(--gaq-text-3)" }}>#{idx + 1}</span>
+                    <span style={{ fontFamily: "var(--gaq-mono)", fontSize: 12, fontWeight: 700, color: "var(--gaq-text)" }}>{r.NumRC || r.TicketSD || r.ProcessKey || "—"}</span>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--gaq-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.Objeto || "Sem objecto"}</div>
+                      <div className="gaq-meta" style={{ marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r._dqDetail || "Pendência identificada"} · {r["Área Requisitante"] || "Área não informada"}</div>
+                    </div>
+                    <span style={{ justifySelf: "start", fontSize: 11, fontWeight: 700, color: r._dqIssue && r._dqIssue.includes("dup") ? "#e74c3c" : r._dqIssue && r._dqIssue.includes("sem_") ? "#ff9500" : "#d35400", background: r._dqIssue && r._dqIssue.includes("dup") ? "#fff1f0" : r._dqIssue && r._dqIssue.includes("sem_") ? "#fff7e6" : "#fff3e8", borderRadius: 999, padding: "6px 10px", whiteSpace: "nowrap" }}>
+                      {r._dqIssue ? r._dqIssue.replaceAll("_", " ") : "pendência"}
+                    </span>
+                    <button className="gaq-icon-btn" onClick={(e) => { e.stopPropagation(); setSelProc(r); }}><Icon name="chevR" size={14}/></button>
+                  </div>
+                ))}
+            </div>
+          </>}
+        </div> : <div className="gaq-card" style={{ padding: 28, textAlign: "center" }}>Carregue a base para analisar a qualidade dos dados.</div>)}
+
         {/* ════════════ ABA: EXECUTIVO ════════════ */}
         {aba === "executivo" && ((execData && executiveStrategic) ? <div>
           {drillDown && drillDown.sourceAba === "executivo" ? <DrillDownPanel
@@ -5893,34 +6228,31 @@ const topModLentas = (() => {
 
         {/* ════════════ ABA: OPERACIONAL ════════════ */}
         {aba === "operacional" && (base.length > 0 ? <div className="anim-fade">
-          <div className="gaq-card" style={{ background: "linear-gradient(135deg, #17324d 0%, #274d72 100%)", borderRadius: 26, padding: "24px 28px", marginBottom: 18, color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 14, border: "none" }}>
+          <div style={{ background: "var(--gaq-surface)", borderRadius: "var(--gaq-r-xl)", padding: "24px 28px", marginBottom: 18, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, border: "1px solid var(--gaq-line)", boxShadow: "var(--gaq-shadow-2)" }}>
             <div>
-              <div style={{ fontSize: 10, opacity: .72, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 6 }}>Painel operacional</div>
-              <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-0.02em" }}>Acompanhamento diário da carteira activa</div>
-              <div style={{ fontSize: 12, opacity: .78, marginTop: 4 }}>Régua global de SLA e entrega aplicada aos filtros actuais</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: "var(--gaq-text)", letterSpacing: "-0.02em" }}>Painel Operacional</div>
+              <div style={{ fontSize: 12, color: "var(--gaq-text-3)", marginTop: 2 }}>Aging, fases e gargalos da carteira activa · {fBase.filter(r => r.emA).length} processos em andamento</div>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
-              <button onClick={() => {
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button className="gaq-btn no-print" onClick={() => {
                 const tituloArea = fArea || "Todas as Áreas";
                 const html = gerarRelatorioOperacional({ processos: fBack, area: tituloArea, meta });
                 const win = window.open("", "_blank");
                 win.document.write(html);
                 win.document.close();
-              }} title="Gerar PDF com os filtros ativos"
-                style={{ background: "rgba(255,255,255,0.15)", color: "#fff", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 7, padding: "7px 16px", cursor: "pointer", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
-                📄 PDF Operacional
+              }} title="Gerar PDF com os filtros ativos">
+                <Icon name="doc" size={14}/> PDF Operacional
               </button>
-              <button onClick={() => {
+              <button className="gaq-btn no-print" onClick={() => {
                 const tituloArea = fArea || "Todas as Áreas";
                 const html = gerarRelatorioGAQSexta({ processos: fBase, area: tituloArea, meta, fBase });
                 const win = window.open("", "_blank");
                 win.document.write(html);
                 win.document.close();
-              }} title="Gerar relatório GAQ do filtro atual"
-                style={{ background: "rgba(255,215,0,0.25)", color: "#fff", border: "1px solid rgba(255,215,0,0.6)", borderRadius: 7, padding: "7px 16px", cursor: "pointer", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
-                📊 PDF GAQ Sexta
+              }} title="Gerar relatório GAQ do filtro atual">
+                <Icon name="doc" size={14}/> GAQ Sexta
               </button>
-              <button onClick={() => {
+              <button className="gaq-btn no-print" onClick={() => {
                 const area = fArea || "Todas";
                 const hoje = new Date();
                 const dataFmt = hoje.toLocaleDateString("pt-BR");
@@ -5933,14 +6265,10 @@ const topModLentas = (() => {
                   return sla && sla.bucket === "critico";
                 }).length;
                 const parados = emA.filter(r => r.diasParado > 15).length;
-
-                // 1. Abre o PDF em nova janela para salvar/imprimir
                 const html = gerarRelatorioGAQSexta({ processos: fBase, area, meta, fBase });
                 const win = window.open("", "_blank");
                 win.document.write(html);
                 win.document.close();
-
-                // 2. Abre Outlook com email pré-preenchido
                 const subject = `Relatório GAQ — ${area} — ${dataFmt} (${diaNome})`;
                 const body =
 `Prezados,
@@ -5958,24 +6286,21 @@ Em caso de dúvidas, fico à disposição.
 
 Atenciosamente,
 GAQ — Gerência de Aquisições`;
-
                 setTimeout(() => {
                   const a = document.createElement("a");
                   a.href = "mailto:?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
                   a.click();
                 }, 800);
-              }} title="Gera o PDF GAQ Sexta e abre o Outlook com e-mail pré-preenchido para a área filtrada"
-                style={{ background: "rgba(0,120,212,0.35)", color: "#fff", border: "1px solid rgba(0,120,212,0.75)", borderRadius: 7, padding: "7px 16px", cursor: "pointer", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
-                📧 Enviar GAQ (Outlook)
+              }} title="Gera o PDF GAQ Sexta e abre o Outlook com e-mail pré-preenchido">
+                <Icon name="external" size={14}/> Outlook
               </button>
-              <button onClick={() => {
+              <button className="gaq-btn no-print" onClick={() => {
                 const html = gerarRelatorioGAQSextaPorAreas({ base, meta });
                 const win = window.open("", "_blank");
                 win.document.write(html);
                 win.document.close();
-              }} title="Gerar um PDF separado por área — todas as áreas com processos em andamento"
-                style={{ background: "rgba(255,165,0,0.3)", color: "#fff", border: "1px solid rgba(255,165,0,0.7)", borderRadius: 7, padding: "7px 16px", cursor: "pointer", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
-                📂 PDF por Áreas
+              }} title="Gerar um PDF separado por área">
+                <Icon name="download" size={14}/> PDF por Áreas
               </button>
             </div>
           </div>
@@ -6022,262 +6347,263 @@ GAQ — Gerência de Aquisições`;
             emAF.forEach(r => { const m = r.Modalidade || "N/I"; if (!modMap[m]) modMap[m] = { total: 0, crit: 0, sumDias: 0 }; modMap[m].total++; if (isOpCritico(r)) modMap[m].crit++; modMap[m].sumDias += r.diasTotais; });
             const modArr = Object.entries(modMap).map(([name, v]) => ({ name, ...v, media: Math.round(v.sumDias / v.total) })).sort((a,b) => b.total - a.total);
 
-            // Por área (em andamento filtrado)
-            const areaMap = {};
-            emAF.forEach(r => { const a = r["Área Requisitante"] || "N/I"; if (!areaMap[a]) areaMap[a] = { total: 0, crit: 0, sumDias: 0 }; areaMap[a].total++; if (isOpCritico(r)) areaMap[a].crit++; areaMap[a].sumDias += r.diasTotais; });
-            const areaArr = Object.entries(areaMap).map(([name, v]) => ({ name, ...v, media: Math.round(v.sumDias / v.total) })).sort((a,b) => b.total - a.total);
-
             // Por comprador (em andamento filtrado) — NCL: respNCL (Comprador||Avaliador), CPL: Pregoeiro
             const compMap = {};
             emAF.forEach(r => { const c = r.ehCPL ? (r.Pregoeiro || r.cplResp || "N/I") : (r.respNCL || "N/I"); if (!compMap[c]) compMap[c] = { total: 0, crit: 0, sumDias: 0 }; compMap[c].total++; if (isOpCritico(r)) compMap[c].crit++; compMap[c].sumDias += r.diasTotais; });
             const compArr = Object.entries(compMap).map(([name, v]) => ({ name, ...v, media: Math.round(v.sumDias / v.total) })).sort((a,b) => b.crit - a.crit || b.total - a.total);
 
-            // Fases do processo (quantos estão em cada etapa)
-            const fases = [
-              { label: "Sem SD/RC", procs: emAF.filter(r => !r.aberturaSD && !r.aberturaRC) },
-              { label: "SD em Distribuição", procs: emAF.filter(r => r.aberturaSD && !pd(r["Data da distribuição do SD"])) },
-              { label: "SD Distribuído", procs: emAF.filter(r => pd(r["Data da distribuição do SD"]) && !pd(r["Data do encerramento"])) },
-              { label: "SD Encerrado", procs: emAF.filter(r => pd(r["Data do encerramento"]) && !pd(r["DATA DO RECEBIMENTO DA RC"])) },
-              { label: "RC Recebida", procs: emAF.filter(r => pd(r["DATA DO RECEBIMENTO DA RC"]) && !pd(r["Data inicial do envio de propostas"]) && !pd(r["Data do envio para aprovação"])) },
-              { label: "Em Cotação", procs: emAF.filter(r => pd(r["Data inicial do envio de propostas"]) && !pd(r["Data final do envio de propostas"])) },
-              { label: "Cotação Recebida", procs: emAF.filter(r => pd(r["Data final do envio de propostas"]) && !pd(r["Data do envio para aprovação"])) },
-              { label: "Em Aprovação", procs: emAF.filter(r => pd(r["Data do envio para aprovação"]) && !pd(r["Data da última aprovação"])) },
-              { label: "Aguard. Pedido/Suite", procs: emAF.filter(r => pd(r["Data da última aprovação"]) && r.semEnvio) },
-            ].map(f => ({ ...f, count: f.procs.length })).filter(f => f.count > 0);
-
-            // Aging por faixa para gráfico
-            const agingChart = [
-              { faixa: "0-15", count: emAF.filter(r => r.diasTotais <= 15).length },
-              { faixa: "16-30", count: emAF.filter(r => r.diasTotais > 15 && r.diasTotais <= 30).length },
-              { faixa: "31-50", count: emAF.filter(r => r.diasTotais > 30 && r.diasTotais <= 50).length },
-              { faixa: "51-80", count: emAF.filter(r => r.diasTotais > 50 && r.diasTotais <= 80).length },
-              { faixa: "81-100", count: emAF.filter(r => r.diasTotais > 80 && r.diasTotais <= 100).length },
-              { faixa: ">100", count: emAF.filter(r => r.diasTotais > 100).length },
-            ];
+            // Funil expandido — filtros explícitos por data para NCL, CPL e Contratos
+            // Processos CPL (para fases CPL)
+            const emAF_CPL = emAF.filter(r => r.ehCPL || pd(r[COL_CPL_RECEBIDO_NCL]) || pd(r[COL_CPL_ENVIADO_DJS_CHANCELA]) || pd(r["CPL_ABERTURA_DISPUTA_FINAL"]) || pd(r["CPL_DATA_HOMOLOGACAO_FINAL"]));
+            const fasesExpandidas = [
+              // ── NCL ──
+              { label: "Sem SD/RC",              area: "NCL", color: "#95a5a6", grad: "linear-gradient(90deg, #95a5a6, #bdc3c7)",
+                procs: emAF.filter(r => !r.aberturaSD && !r.aberturaRC) },
+              { label: "SD em Distribuição",      area: "NCL", color: "#2e86c1", grad: "linear-gradient(90deg, #2e86c1, #85c1e9)",
+                procs: emAF.filter(r => r.aberturaSD && !pd(r["Data da distribuição do SD"])) },
+              { label: "SD Distribuído",           area: "NCL", color: "#2e86c1", grad: "linear-gradient(90deg, #2e86c1, #85c1e9)",
+                procs: emAF.filter(r => pd(r["Data da distribuição do SD"]) && !pd(r["Data do encerramento"])) },
+              { label: "SD Encerrado",             area: "NCL", color: "#2e86c1", grad: "linear-gradient(90deg, #2e86c1, #85c1e9)",
+                procs: emAF.filter(r => pd(r["Data do encerramento"]) && !pd(r["DATA DO RECEBIMENTO DA RC"])) },
+              { label: "RC Recebida",              area: "NCL", color: "#2e86c1", grad: "linear-gradient(90deg, #2e86c1, #85c1e9)",
+                procs: emAF.filter(r => pd(r["DATA DO RECEBIMENTO DA RC"]) && !pd(r["Data inicial do envio de propostas"]) && !pd(r["Data do envio para aprovação"]) && !pd(r[COL_CPL_RECEBIDO_NCL])) },
+              { label: "Em Cotação",               area: "NCL", color: "#2e86c1", grad: "linear-gradient(90deg, #2e86c1, #85c1e9)",
+                procs: emAF.filter(r => pd(r["Data inicial do envio de propostas"]) && !pd(r["Data final do envio de propostas"])) },
+              { label: "Cotação Recebida",         area: "NCL", color: "#2e86c1", grad: "linear-gradient(90deg, #2e86c1, #85c1e9)",
+                procs: emAF.filter(r => pd(r["Data final do envio de propostas"]) && !pd(r["Data do envio para aprovação"])) },
+              { label: "Em Aprovação",             area: "NCL", color: "#2e86c1", grad: "linear-gradient(90deg, #2e86c1, #85c1e9)",
+                procs: emAF.filter(r => pd(r["Data do envio para aprovação"]) && !pd(r["Data da última aprovação"])) },
+              { label: "Última Aprovação",         area: "NCL", color: "#2e86c1", grad: "linear-gradient(90deg, #2e86c1, #85c1e9)",
+                procs: emAF.filter(r => pd(r["Data da última aprovação"]) && r.semEnvio && !pd(r[COL_CPL_RECEBIDO_NCL])) },
+              { label: "Envio Pedido/Suite",        area: "NCL", color: "#2e86c1", grad: "linear-gradient(90deg, #2e86c1, #85c1e9)",
+                procs: emAF.filter(r => pd(r["DATA DE ENVIO DO PEDIDO (fornecedor) OU SUITE SESC (SCONT ou CPL)"]) && !pd(r["DATA DE RECEBIMENTO DA DEMANDA PELA ANALISTA DE CONTRATO"]) && !pd(r[COL_CPL_RECEBIDO_NCL])) },
+              // ── CPL ──
+              { label: "CPL: Recebido do NCL",     area: "CPL", color: "#8e44ad", grad: "linear-gradient(90deg, #8e44ad, #c39bd3)",
+                procs: emAF_CPL.filter(r => pd(r[COL_CPL_RECEBIDO_NCL]) && !pd(r[COL_CPL_ENVIADO_DJS_CHANCELA])) },
+              { label: "CPL: Enviado p/ DJS",      area: "CPL", color: "#8e44ad", grad: "linear-gradient(90deg, #8e44ad, #c39bd3)",
+                procs: emAF_CPL.filter(r => pd(r[COL_CPL_ENVIADO_DJS_CHANCELA]) && !pd(r["CPL_DATA_RECEBIMENTO_FINAL"])) },
+              { label: "CPL: Recebimento",         area: "CPL", color: "#8e44ad", grad: "linear-gradient(90deg, #8e44ad, #c39bd3)",
+                procs: emAF_CPL.filter(r => pd(r["CPL_DATA_RECEBIMENTO_FINAL"]) && !pd(r["CPL_PUBLICACAO_AVISO_FINAL"])) },
+              { label: "CPL: Publicação",           area: "CPL", color: "#8e44ad", grad: "linear-gradient(90deg, #8e44ad, #c39bd3)",
+                procs: emAF_CPL.filter(r => pd(r["CPL_PUBLICACAO_AVISO_FINAL"]) && !pd(r["CPL_ABERTURA_DISPUTA_FINAL"])) },
+              { label: "CPL: Abertura Disputa",    area: "CPL", color: "#8e44ad", grad: "linear-gradient(90deg, #8e44ad, #c39bd3)",
+                procs: emAF_CPL.filter(r => pd(r["CPL_ABERTURA_DISPUTA_FINAL"]) && !pd(r["CPL_FINALIZACAO_FASE_EXTERNA_FINAL"])) },
+              { label: "CPL: Fase ext.",            area: "CPL", color: "#8e44ad", grad: "linear-gradient(90deg, #8e44ad, #c39bd3)",
+                procs: emAF_CPL.filter(r => pd(r["CPL_FINALIZACAO_FASE_EXTERNA_FINAL"]) && !pd(r["CPL_DATA_HOMOLOGACAO_FINAL"])) },
+              { label: "CPL: Homologação",          area: "CPL", color: "#8e44ad", grad: "linear-gradient(90deg, #8e44ad, #c39bd3)",
+                procs: emAF_CPL.filter(r => pd(r["CPL_DATA_HOMOLOGACAO_FINAL"]) && !pd(r["DATA DE RECEBIMENTO DA DEMANDA PELA ANALISTA DE CONTRATO"])) },
+              // ── Contratos (SCONT / DJ) ──
+              { label: "Indicação Analista",       area: "Contratos", color: "#16a085", grad: "linear-gradient(90deg, #16a085, #76d7c4)",
+                procs: emAF.filter(r => pd(r["DATA DE RECEBIMENTO DA DEMANDA PELA ANALISTA DE CONTRATO"]) && !pd(r["DATA DE RECEBIMENTO NA DJ (QUANDO APLICÁVEL)"])) },
+              { label: "Recebimento DJ",            area: "Contratos", color: "#16a085", grad: "linear-gradient(90deg, #16a085, #76d7c4)",
+                procs: emAF.filter(r => pd(r["DATA DE RECEBIMENTO NA DJ (QUANDO APLICÁVEL)"])) },
+            ].map(f => ({ ...f, count: f.procs.length }));
+            // Totais por grupo (para decidir se mostra o grupo)
+            const totalPorGrupo = {};
+            fasesExpandidas.forEach(f => { totalPorGrupo[f.area] = (totalPorGrupo[f.area] || 0) + f.count; });
+            const maxFase = Math.max(...fasesExpandidas.map(f => f.count), 1);
 
             return <>
-            {/* KPIs */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 18 }}>
-              {[
-                { t: "Em andamento", v: emAF.length, c: "#2e86c1" },
-                { t: "Crítico", v: opsCriticos.length, c: "#d35400" },
-                { t: "Em atenção", v: opsAtencao.length, c: "#ff9500" },
-                { t: "SLA vencido", v: opsSlaVencido.length, c: "#ff3b30" },
-                { t: "SLA atendido", v: opsSlaAtendido.length, c: "#34c759" },
-                { t: "Média aging", v: mediaAging + " d.u.", c: mediaAging > 60 ? "#d35400" : "#2e86c1" },
-              ].map(k => (
-                <div key={k.t} className="gaq-card" style={{ padding: "16px 18px", borderTop: `3px solid ${k.c}` }}>
-                  <div style={{ fontSize: 10, color: "var(--gaq-text-3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>{k.t}</div>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: k.c, lineHeight: 1 }}>{k.v}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* Funil de Fases */}
+            {/* Funil de Fases Expandido — NCL + CPL + Contratos */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
               <div className="gaq-card" style={{ padding: 22, borderRadius: 24, position: "relative" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: "var(--gaq-text)" }}>Funil de fases</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: "var(--gaq-text)" }}>Funil de fases</div>
+                    <div style={{ fontSize: 11, color: "var(--gaq-text-3)", marginTop: 2 }}>Onde cada processo está parado agora</div>
+                  </div>
                   <button onClick={() => setShowFunilInfo(!showFunilInfo)}
                     style={{ background: showFunilInfo ? "#2e86c1" : "var(--border2)", border: "none", borderRadius: "50%", width: 22, height: 22, cursor: "pointer", fontSize: 12, fontWeight: 800, color: showFunilInfo ? "#fff" : "var(--text3)", flexShrink: 0, lineHeight: "22px", textAlign: "center" }}
-                    title="Ver regras de classificação das fases">ℹ</button>
+                    title="Ver legenda das subáreas">?</button>
                 </div>
                 {showFunilInfo && (
                   <div style={{ background: "var(--bg)", border: "1px solid var(--border2)", borderRadius: 8, padding: 12, marginBottom: 12, fontSize: 10, lineHeight: 1.6, color: "var(--text2)" }}>
-                    <div style={{ fontWeight: 700, fontSize: 11, marginBottom: 6, color: "var(--text)" }}>📖 Regras de Classificação das Fases</div>
-                    <div style={{ display: "grid", gap: 4 }}>
-                      <div><b style={{ color: "#2e86c1" }}>Sem SD/RC:</b> Não tem data de abertura do SD nem data de recebimento da RC</div>
-                      <div><b style={{ color: "#2e86c1" }}>SD em Distribuição:</b> Tem abertura SD, mas não tem distribuição do SD</div>
-                      <div><b style={{ color: "#2e86c1" }}>SD Distribuído:</b> Tem distribuição SD, mas não tem encerramento SD</div>
-                      <div><b style={{ color: "#2e86c1" }}>SD Encerrado:</b> Tem encerramento SD, mas não tem recebimento RC</div>
-                      <div><b style={{ color: "#2e86c1" }}>RC Recebida:</b> Tem recebimento RC, mas não tem início de propostas nem envio para aprovação</div>
-                      <div><b style={{ color: "#2e86c1" }}>Em Cotação:</b> Tem início de propostas, mas não tem final de propostas</div>
-                      <div><b style={{ color: "#2e86c1" }}>Cotação Recebida:</b> Tem final de propostas, mas não tem envio para aprovação</div>
-                      <div><b style={{ color: "#2e86c1" }}>Em Aprovação:</b> Tem envio para aprovação, mas não tem última aprovação</div>
-                      <div><b style={{ color: "#2e86c1" }}>Aguard. Pedido/Suite:</b> Tem última aprovação, mas o campo de envio pedido/Suite está vazio</div>
+                    <div style={{ fontWeight: 700, fontSize: 11, marginBottom: 6, color: "var(--text)" }}>Legenda das subáreas</div>
+                    <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+                      <span><span style={{ color: "#2e86c1", fontWeight: 700 }}>■</span> NCL — Núcleo de Compras e Licitações</span>
+                      <span><span style={{ color: "#8e44ad", fontWeight: 700 }}>■</span> CPL — Comissão Permanente de Licitação</span>
+                      <span><span style={{ color: "#16a085", fontWeight: 700 }}>■</span> Contratos — SCONT / DJ</span>
                     </div>
-                    <div style={{ marginTop: 6, fontSize: 9, color: "var(--text3)", fontStyle: "italic" }}>Clique em qualquer fase para visualizar os processos correspondentes.</div>
+                    <div style={{ marginTop: 6, fontSize: 9, color: "var(--text3)", fontStyle: "italic" }}>Cada fase mostra quantos processos ativos estão naquela etapa. Clique para ver a lista.</div>
                   </div>
                 )}
-                {fases.map((f, i) => {
-                  const maxC = Math.max(...fases.map(x => x.count));
-                  const pct = maxC > 0 ? Math.round((f.count / maxC) * 100) : 0;
-                  return (
-                    <div key={f.label} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, cursor: "pointer", borderRadius: 4, padding: "2px 4px", transition: "background .15s" }}
-                      onMouseEnter={e => e.currentTarget.style.background = "var(--hover)"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                      onClick={() => { setDrillDown({ title: "Fase: " + f.label, data: f.procs, color: "#2e86c1", sourceAba: "operacional" }); setAba("overview"); }}>
-                      <div style={{ fontSize: 10, color: "var(--text2)", width: 140, flexShrink: 0, textAlign: "right" }}>{f.label}</div>
-                      <div style={{ flex: 1, background: "var(--border2)", borderRadius: 4, height: 18, overflow: "hidden" }}>
-                        <div style={{ width: pct + "%", height: "100%", background: `linear-gradient(90deg, #2e86c1, #85c1e9)`, borderRadius: 4, transition: "width .5s" }} />
-                      </div>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: "#2e86c1", width: 30, textAlign: "right" }}>{f.count}</div>
-                    </div>
-                  );
-                })}
+                {(() => {
+                  let lastArea = "";
+                  return fasesExpandidas.map((f, i) => {
+                    const pct = maxFase > 0 ? Math.round((f.count / maxFase) * 100) : 0;
+                    const showHeader = f.area !== lastArea;
+                    const grupoTemProcessos = (totalPorGrupo[f.area] || 0) > 0;
+                    lastArea = f.area;
+                    // Esconder grupo inteiro só se não tem nenhum processo (ex: CPL quando não há pregões)
+                    if (!grupoTemProcessos && f.area !== "NCL") return null;
+                    return (
+                      <React.Fragment key={f.label}>
+                        {showHeader && (
+                          <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: f.color, marginTop: i > 0 ? 10 : 0, marginBottom: 4, paddingLeft: 148, opacity: .8 }}>
+                            {f.area} {f.area !== "NCL" && <span style={{ fontWeight: 400, opacity: .7 }}>({totalPorGrupo[f.area] || 0})</span>}
+                          </div>
+                        )}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, cursor: f.count > 0 ? "pointer" : "default", borderRadius: 6, padding: "3px 4px", transition: "background .15s", opacity: f.count === 0 ? .45 : 1 }}
+                          onMouseEnter={e => { if (f.count > 0) e.currentTarget.style.background = "var(--hover)"; }} onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                          onClick={() => { if (f.count > 0) { setDrillDown({ title: "Fase: " + f.label, data: f.procs, color: f.color, sourceAba: "operacional" }); setAba("overview"); } }}>
+                          <div style={{ fontSize: 10, color: "var(--text2)", width: 140, flexShrink: 0, textAlign: "right", lineHeight: 1.2 }}>{f.label}</div>
+                          <div style={{ flex: 1, background: "var(--border2)", borderRadius: 4, height: 18, overflow: "hidden" }}>
+                            {f.count > 0 && <div style={{ width: Math.max(pct, 3) + "%", height: "100%", background: f.grad, borderRadius: 4, transition: "width .5s" }} />}
+                          </div>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: f.count > 0 ? f.color : "var(--text3)", width: 32, textAlign: "right" }}>{f.count}</div>
+                        </div>
+                      </React.Fragment>
+                    );
+                  });
+                })()}
+                {emAF.length === 0 && <div style={{ color: "var(--text3)", fontSize: 12, textAlign: "center", padding: 20 }}>Nenhum processo em andamento.</div>}
               </div>
 
-              <div className="gaq-card" style={{ padding: 22, borderRadius: 24 }}>
-                <div style={{ fontWeight: 700, fontSize: 14, color: "var(--gaq-text)", marginBottom: 10 }}>Distribuição de aging</div>
-                <Recharts.ResponsiveContainer width="100%" height={200}>
-                  <Recharts.BarChart data={agingChart} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-                    <Recharts.XAxis dataKey="faixa" fontSize={10} tick={{ fill: "var(--text3)" }} />
-                    <Recharts.YAxis fontSize={10} tick={{ fill: "var(--text3)" }} />
-                    <Recharts.Tooltip />
-                    <Recharts.Bar dataKey="count" name="Processos" radius={[4,4,0,0]}>
-                      {agingChart.map((_, i) => <Recharts.Cell key={i} fill={["#27ae60","#2ecc71","#f39c12","#e67e22","#c0392b","#922b21"][i]} />)}
-                    </Recharts.Bar>
-                  </Recharts.BarChart>
-                </Recharts.ResponsiveContainer>
+              {/* Estagnados */}
+              <div className="gaq-card" style={{ padding: 22, borderRadius: 24, borderTop: "3px solid #e67e22" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: "var(--gaq-text)" }}>Estagnados</div>
+                    <div style={{ fontSize: 11, color: "var(--gaq-text-3)", marginTop: 2 }}>{emAF.filter(r => r.diasParado > 15).length} processos sem movimentação ha mais de 15 d.u.</div>
+                  </div>
+                  {emAF.filter(r => r.diasParado > 15).length > 8 && (
+                    <button className="gaq-btn" style={{ fontSize: 11 }}
+                      onClick={() => { setDrillDown({ title: "Processos estagnados (>15 d.u. sem movimentação)", data: emAF.filter(r => r.diasParado > 15).sort((a,b) => b.diasParado - a.diasParado), color: "#e67e22", sourceAba: "operacional" }); setAba("overview"); }}>
+                      Ver todos
+                    </button>
+                  )}
+                </div>
+                {(() => {
+                  const parados = [...emAF].filter(r => r.diasParado > 15).sort((a,b) => b.diasParado - a.diasParado).slice(0, 8);
+                  if (parados.length === 0) return <div style={{ color: "var(--text3)", fontSize: 12, textAlign: "center", padding: 12 }}>Nenhum processo estagnado.</div>;
+                  return parados.map(r => (
+                    <div key={r.ProcessKey} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderBottom: "1px solid var(--gaq-line)", cursor: "pointer", fontSize: 11 }}
+                      onClick={() => setSelProc(r)}>
+                      <div style={{ width: 6, height: 6, borderRadius: "50%", background: r.diasParado > 30 ? "#c0392b" : "#e67e22", flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--gaq-text)" }}>{r.NumRC || r.TicketSD || "—"} — {(r.Objeto || "").slice(0, 40)}</div>
+                      <div style={{ flexShrink: 0, fontWeight: 700, color: r.diasParado > 30 ? "#c0392b" : "#e67e22" }}>{r.diasParado} d.u.</div>
+                      <div style={{ flexShrink: 0, fontSize: 9, color: "var(--gaq-text-3)" }}>{r.faseAtual || "—"}</div>
+                    </div>
+                  ));
+                })()}
               </div>
             </div>
 
-            {/* Status Detalhado + Por Modalidade */}
+            {/* Status Detalhado + Modalidades */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
               <div className="gaq-card" style={{ padding: 22, borderRadius: 24 }}>
-                <div style={{ fontWeight: 700, fontSize: 14, color: "var(--gaq-text)", marginBottom: 10 }}>Status detalhado</div>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "var(--gaq-text)", marginBottom: 2 }}>Status detalhado</div>
+                <div style={{ fontSize: 11, color: "var(--gaq-text-3)", marginBottom: 10 }}>Processos em andamento por status</div>
                 {statusDetArr.slice(0, 15).map(([s, cnt]) => (
-                  <div key={s} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid var(--border2)", fontSize: 11, gap: 8, alignItems: "center" }}>
-                    <span style={{ color: "var(--text)", flex: 1, wordBreak: "break-word", lineHeight: 1.3 }} title={s}>{s}</span>
-                    <span style={{ fontWeight: 700, color: "#2e86c1", flexShrink: 0 }}>{cnt} <span style={{ fontSize: 9, fontWeight: 400, color: "var(--text3)" }}>({emAF.length > 0 ? Math.round((cnt/emAF.length)*100) : 0}%)</span></span>
+                  <div key={s} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid var(--gaq-line)", fontSize: 11, gap: 8, alignItems: "center" }}>
+                    <span style={{ color: "var(--gaq-text)", flex: 1, wordBreak: "break-word", lineHeight: 1.3 }} title={s}>{s}</span>
+                    <span style={{ fontWeight: 700, color: "#2e86c1", flexShrink: 0 }}>{cnt} <span style={{ fontSize: 9, fontWeight: 400, color: "var(--gaq-text-3)" }}>({emAF.length > 0 ? Math.round((cnt/emAF.length)*100) : 0}%)</span></span>
                   </div>
                 ))}
               </div>
               <div className="gaq-card" style={{ padding: 22, borderRadius: 24 }}>
-                <div style={{ fontWeight: 700, fontSize: 14, color: "var(--gaq-text)", marginBottom: 10 }}>Modalidades activas</div>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "var(--gaq-text)", marginBottom: 2 }}>Modalidades activas</div>
+                <div style={{ fontSize: 11, color: "var(--gaq-text-3)", marginBottom: 10 }}>Volume e aging por modalidade</div>
                 {modArr.slice(0, 10).map(m => (
-                  <div key={m.name} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid var(--border2)", fontSize: 11, gap: 6, alignItems: "center", cursor: "pointer" }}
-                    onClick={() => { 
+                  <div key={m.name} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid var(--gaq-line)", fontSize: 11, gap: 6, alignItems: "center", cursor: "pointer" }}
+                    onClick={() => {
                       const procs = emAF.filter(r => (r.Modalidade || "N/I") === m.name);
-                      setDrillDown({ title: "Modalidade: " + m.name + " — Em Andamento", data: procs, color: "#2e86c1", sourceAba: "operacional" }); setAba("overview"); 
+                      setDrillDown({ title: "Modalidade: " + m.name + " — Em Andamento", data: procs, color: "#2e86c1", sourceAba: "operacional" }); setAba("overview");
                     }}>
-                    <span style={{ color: "var(--text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
+                    <span style={{ color: "var(--gaq-text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
                     <span style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
                       <span style={{ fontWeight: 700, color: "#2e86c1" }}>{m.total}</span>
                       {m.crit > 0 && <span style={{ fontSize: 9, background: "#c0392b", color: "#fff", borderRadius: 4, padding: "0 5px", fontWeight: 700 }}>{m.crit} crít.</span>}
-                      <span style={{ fontSize: 9, color: "var(--text3)" }}>~{m.media} d.u.</span>
+                      <span style={{ fontSize: 9, color: "var(--gaq-text-3)" }}>~{m.media} d.u.</span>
                     </span>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Por Área + Top Compradores */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
-              <div className="gaq-card" style={{ padding: 22, borderRadius: 24 }}>
-                <div style={{ fontWeight: 700, fontSize: 14, color: "var(--gaq-text)", marginBottom: 10 }}>Áreas requisitantes</div>
-                <Recharts.ResponsiveContainer width="100%" height={Math.max(150, areaArr.slice(0,10).length * 28)}>
-                  <Recharts.BarChart data={areaArr.slice(0, 10)} layout="vertical" margin={{ left: 80, right: 20 }}>
-                    <Recharts.XAxis type="number" fontSize={10} />
-                    <Recharts.YAxis type="category" dataKey="name" fontSize={9} width={76} tickFormatter={v => v.length > 12 ? v.slice(0,11) + "…" : v} />
-                    <Recharts.Tooltip formatter={(v, n) => [v + " proc.", n === "crit" ? "Críticos" : "Total"]} />
-                    <Recharts.Bar dataKey="total" fill="#2e86c1" radius={[0,3,3,0]} name="Total" />
-                    <Recharts.Bar dataKey="crit" fill="#c0392b" radius={[0,3,3,0]} name="Críticos" />
-                  </Recharts.BarChart>
-                </Recharts.ResponsiveContainer>
-              </div>
-              {!loginUser && !loginArea
-                ? <div className="gaq-card" style={{ padding: 22, borderRadius: 24 }}>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: "var(--gaq-text)", marginBottom: 10 }}>Responsáveis com mais pressão</div>
-                    {compArr.slice(0, 12).map((c, i) => (
-                      <div key={c.name} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid var(--border2)", fontSize: 11, gap: 6, alignItems: "center", cursor: "pointer" }}
-                        onClick={() => {
-                          const procs = emAF.filter(r => (r.ehCPL ? (r.Pregoeiro || r.cplResp || "N/I") : (r.respNCL || "N/I")) === c.name);
-                          setDrillDown({ title: "Responsável: " + c.name + " — Em Andamento", data: procs, color: "#1a5276", sourceAba: "operacional" }); setAba("overview");
-                        }}>
-                        <span style={{ color: "#2e86c1", textDecoration: "underline", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          <b style={{ color: "var(--text3)", marginRight: 4 }}>#{i+1}</b>{c.name}
-                        </span>
-                        <span style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
-                          <span style={{ fontWeight: 700, color: "#2e86c1" }}>{c.total}</span>
-                          {c.crit > 0 && <span style={{ fontSize: 9, background: "#c0392b", color: "#fff", borderRadius: 4, padding: "0 5px", fontWeight: 700 }}>{c.crit} crít.</span>}
-                          <span style={{ fontSize: 9, color: "var(--text3)" }}>~{c.media} d.u.</span>
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                : loginArea
-                  ? <div className="gaq-card" style={{ padding: 22, borderRadius: 24 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14, color: "var(--gaq-text)", marginBottom: 10 }}>Processos em andamento — {loginArea}</div>
-                      {emAF.length === 0
-                        ? <div style={{ color: "var(--text3)", fontSize: 12 }}>Nenhum processo em andamento.</div>
-                        : [...emAF].sort((a,b) => (getOpSla(b)?.rank || 0) - (getOpSla(a)?.rank || 0) || (b.diasTotais - a.diasTotais)).slice(0, 15).map(r => {
-                            const cor = opTone(r);
-                            return (
-                              <div key={r.ProcessKey} onClick={() => setSelProc(r)}
-                                style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: "1px solid var(--border2)", cursor: "pointer" }}>
-                                <div style={{ width: 8, height: 8, borderRadius: "50%", background: cor, flexShrink: 0 }} />
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontSize: 11, fontWeight: 700, color: "#2e86c1" }}>{r.NumRC || r.TicketSD || "—"}</div>
-                                  <div style={{ fontSize: 10, color: "var(--text2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(r.Objeto || "").slice(0, 55) || "—"}</div>
-                                </div>
-                                <div style={{ flexShrink: 0, textAlign: "right" }}>
-                                  <div style={{ fontSize: 11, fontWeight: 800, color: cor }}>{r.diasTotais} d.u.</div>
-                                  <div style={{ fontSize: 9, color: "var(--text3)" }}>{r.faseAtual || "—"}</div>
-                                  {r.dataEntrega && <div style={{ fontSize: 9, color: "#2e86c1" }}>📅 {r.dataEntrega.toLocaleDateString("pt-BR")}</div>}
-                                </div>
-                              </div>
-                            );
-                          })
-                      }
-                    </div>
-                  : <div className="gaq-card" style={{ padding: 22, borderRadius: 24 }}>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: "var(--gaq-text)", marginBottom: 10 }}>Minha carteira prioritária</div>
-                    {fBack.length === 0
-                      ? <div style={{ color: "var(--text3)", fontSize: 12 }}>Nenhum processo em andamento.</div>
-                      : [...fBack].sort((a,b) => (getOpSla(b)?.rank || 0) - (getOpSla(a)?.rank || 0) || (b.diasTotais - a.diasTotais)).slice(0, 15).map(r => {
-                          const cor = opTone(r);
-                          return (
-                            <div key={r.ProcessKey} onClick={() => setSelProc(r)}
-                              style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: "1px solid var(--border2)", cursor: "pointer" }}>
-                              <div style={{ width: 8, height: 8, borderRadius: "50%", background: cor, flexShrink: 0 }} />
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 11, fontWeight: 700, color: "#2e86c1" }}>{r.NumRC || r.TicketSD || "—"}</div>
-                                <div style={{ fontSize: 10, color: "var(--text2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(r.Objeto || "").slice(0, 55) || "—"}</div>
-                              </div>
-                              <div style={{ flexShrink: 0, textAlign: "right" }}>
-                                <div style={{ fontSize: 11, fontWeight: 800, color: cor }}>{r.diasTotais} d.u.</div>
-                                <div style={{ fontSize: 9, color: "var(--text3)" }}>{r.faseAtual || "—"}</div>
-                                {r.dataEntrega && <div style={{ fontSize: 9, color: "#2e86c1" }}>📅 {r.dataEntrega.toLocaleDateString("pt-BR")}</div>}
-                              </div>
-                            </div>
-                          );
-                        })
-                    }
-                  </div>
-              }
-            </div>
-
-            {/* Sazonalidade — Padrão mensal de aberturas */}
+            {/* Fluxo Mensal — SD e RC */}
             {(() => {
-              const MESES_LABEL = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
-              const mesCount = Array(12).fill(0);
-              fBase.forEach(r => { if (r.mesAbertura !== null && r.mesAbertura !== undefined) mesCount[r.mesAbertura]++; });
-              const maxM = Math.max(...mesCount);
-              const avgM = mesCount.reduce((a,b)=>a+b,0) / 12;
-              if (maxM < 3) return null;
+              const MESES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+              const getYM = (d) => d ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}` : null;
+              const ymLabel = (ym) => { const [y,m] = ym.split("-"); return MESES[parseInt(m,10)-1] + "/" + y.slice(2); };
+
+              // Coletar todos os meses presentes na base
+              const ymSet = new Set();
+              fBase.forEach(r => {
+                const ym1 = getYM(r.aberturaSD);
+                const ym2 = getYM(r.aberturaRC);
+                const ym3 = getYM(r.ultimaData);
+                if (ym1) ymSet.add(ym1);
+                if (ym2) ymSet.add(ym2);
+                if (ym3) ymSet.add(ym3);
+              });
+              const allYM = [...ymSet].sort();
+              if (allYM.length < 2) return null;
+              // Últimos 12 meses no máximo
+              const recentYM = allYM.slice(-12);
+
+              // ── Gráfico SD ──
+              // SD: processos que TÊM abertura de SD (todos, mesmo que depois gerem RC)
+              const sdBase = fBase.filter(r => r.aberturaSD);
+              const sdData = recentYM.map(ym => {
+                const abertos = sdBase.filter(r => getYM(r.aberturaSD) === ym).length;
+                // Cancelados SD: somenteSD (só tem SD, não virou RC) e está cancelado/fracassado
+                const cancelados = sdBase.filter(r => r.somenteSD && (r.isCanceled || r.isFailed) && getYM(r.aberturaSD) === ym).length;
+                // Concluídos SD: tem encerramento do SD nesse mês
+                const concluidos = sdBase.filter(r => r.encSD && getYM(r.encSD) === ym).length;
+                const saldo = abertos - cancelados - concluidos;
+                return { mes: ymLabel(ym), Abertos: abertos, Cancelados: cancelados, Concluídos: concluidos, Saldo: saldo };
+              });
+
+              // ── Gráfico RC ──
+              const rcBase = fBase.filter(r => r.aberturaRC);
+              const rcData = recentYM.map(ym => {
+                const abertos = rcBase.filter(r => getYM(r.aberturaRC) === ym).length;
+                // Cancelados RC: tem RC e está cancelado/fracassado, pela data da RC
+                const cancelados = rcBase.filter(r => (r.isCanceled || r.isFailed) && getYM(r.aberturaRC) === ym).length;
+                // Concluídos RC: concluído e a última data preenchida cai nesse mês
+                const concluidos = rcBase.filter(r => r.isConcluded && r.ultimaData && getYM(r.ultimaData) === ym).length;
+                const saldo = abertos - cancelados - concluidos;
+                return { mes: ymLabel(ym), Abertos: abertos, Cancelados: cancelados, Concluídos: concluidos, Saldo: saldo };
+              });
+
               return (
-                <div className="gaq-card" style={{ padding: 22, borderRadius: 24, marginBottom: 16 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: "var(--gaq-text)", marginBottom: 14 }}>Sazonalidade de aberturas</div>
-                    <div style={{ display: "flex", gap: 6, alignItems: "flex-end", minHeight: 90, paddingTop: 4 }}>
-                    {mesCount.map((c, i) => {
-                      const h = maxM > 0 ? Math.max(6, (c / maxM) * 80) : 6;
-                      const isPeak = c > avgM * 1.3;
-                      const isLow = c < avgM * 0.7;
-                      return (
-                        <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end" }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: isPeak ? "#c0392b" : isLow ? "#85c1e9" : "var(--text2)", marginBottom: 2 }}>{c}</div>
-                          <div style={{ width: "100%", height: h, background: isPeak ? "#c0392b" : isLow ? "#85c1e9" : "#2e86c1", borderRadius: "4px 4px 0 0", transition: "height 0.3s" }} />
-                        </div>
-                      );
-                    })}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
+                  <div className="gaq-card" style={{ padding: 22, borderRadius: 24 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: "var(--gaq-text)", marginBottom: 2 }}>Fluxo mensal — SD</div>
+                    <div style={{ fontSize: 11, color: "var(--gaq-text-3)", marginBottom: 10 }}>Aberturas, cancelamentos e conclusões de SD por mês</div>
+                    <Recharts.ResponsiveContainer width="100%" height={220}>
+                      <Recharts.ComposedChart data={sdData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                        <Recharts.CartesianGrid strokeDasharray="3 3" stroke="var(--gaq-line)" />
+                        <Recharts.XAxis dataKey="mes" fontSize={9} tick={{ fill: "var(--gaq-text-3)" }} />
+                        <Recharts.YAxis fontSize={10} tick={{ fill: "var(--gaq-text-3)" }} />
+                        <Recharts.Tooltip formatter={(v, n) => [n === "Saldo" ? (v >= 0 ? "+" + v : v) : v, n]} />
+                        <Recharts.Legend wrapperStyle={{ fontSize: 10 }} />
+                        <Recharts.Bar dataKey="Abertos" fill="#2e86c1" radius={[3,3,0,0]} />
+                        <Recharts.Bar dataKey="Cancelados" fill="#e74c3c" radius={[3,3,0,0]} />
+                        <Recharts.Bar dataKey="Concluídos" fill="#27ae60" radius={[3,3,0,0]} />
+                        <Recharts.Bar dataKey="Saldo" fill="#d4a017" radius={[3,3,0,0]} />
+                        <Recharts.ReferenceLine y={0} stroke="var(--gaq-text-3)" strokeDasharray="3 3" />
+                      </Recharts.ComposedChart>
+                    </Recharts.ResponsiveContainer>
                   </div>
-                  <div style={{ display: "flex", gap: 4, marginTop: 3 }}>
-                    {MESES_LABEL.map((m, i) => <div key={i} style={{ flex: 1, textAlign: "center", fontSize: 9, color: "var(--text3)" }}>{m}</div>)}
-                  </div>
-                  <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 8, display: "flex", gap: 14 }}>
-                    <span><span style={{ color: "#c0392b", fontWeight: 700 }}>■</span> Pico (&gt;130% média)</span>
-                    <span><span style={{ color: "#85c1e9", fontWeight: 700 }}>■</span> Baixa (&lt;70% média)</span>
-                    <span>Média: {Math.round(avgM)} proc/mês</span>
+                  <div className="gaq-card" style={{ padding: 22, borderRadius: 24 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: "var(--gaq-text)", marginBottom: 2 }}>Fluxo mensal — RC</div>
+                    <div style={{ fontSize: 11, color: "var(--gaq-text-3)", marginBottom: 10 }}>Aberturas, cancelamentos e conclusões de RC por mês</div>
+                    <Recharts.ResponsiveContainer width="100%" height={220}>
+                      <Recharts.ComposedChart data={rcData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                        <Recharts.CartesianGrid strokeDasharray="3 3" stroke="var(--gaq-line)" />
+                        <Recharts.XAxis dataKey="mes" fontSize={9} tick={{ fill: "var(--gaq-text-3)" }} />
+                        <Recharts.YAxis fontSize={10} tick={{ fill: "var(--gaq-text-3)" }} />
+                        <Recharts.Tooltip formatter={(v, n) => [n === "Saldo" ? (v >= 0 ? "+" + v : v) : v, n]} />
+                        <Recharts.Legend wrapperStyle={{ fontSize: 10 }} />
+                        <Recharts.Bar dataKey="Abertos" fill="#2e86c1" radius={[3,3,0,0]} />
+                        <Recharts.Bar dataKey="Cancelados" fill="#e74c3c" radius={[3,3,0,0]} />
+                        <Recharts.Bar dataKey="Concluídos" fill="#27ae60" radius={[3,3,0,0]} />
+                        <Recharts.Bar dataKey="Saldo" fill="#d4a017" radius={[3,3,0,0]} />
+                        <Recharts.ReferenceLine y={0} stroke="var(--gaq-text-3)" strokeDasharray="3 3" />
+                      </Recharts.ComposedChart>
+                    </Recharts.ResponsiveContainer>
                   </div>
                 </div>
               );
@@ -6285,21 +6611,22 @@ GAQ — Gerência de Aquisições`;
 
             {/* Insights Operacionais */}
             <div className="gaq-card" style={{ padding: 22, borderRadius: 24 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: "var(--gaq-text)", marginBottom: 10 }}>Insights operacionais</div>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "var(--gaq-text)", marginBottom: 2 }}>Insights operacionais</div>
+              <div style={{ fontSize: 11, color: "var(--gaq-text-3)", marginBottom: 10 }}>Alertas automáticos baseados nos filtros actuais</div>
               {(() => {
                 const opsInsights = [];
-                const bigFase = fases.sort((a,b) => b.count - a.count)[0];
-                if (bigFase && bigFase.count > 5) opsInsights.push({ icon: "🔄", text: `Maior concentração na fase "${bigFase.label}" com ${bigFase.count} processos. Avaliar ações para destravar esta etapa.`, color: "#d35400" });
+                const bigFase = [...fasesExpandidas].filter(f => f.count > 0).sort((a,b) => b.count - a.count)[0];
+                if (bigFase && bigFase.count > 5) opsInsights.push({ icon: "🔄", text: `Maior concentração na fase "${bigFase.label}" (${bigFase.area}) com ${bigFase.count} processos. Avaliar ações para destravar esta etapa.`, color: "#d35400" });
                 const topComp = compArr[0];
-                if (!loginArea && topComp && topComp.crit > 3) opsInsights.push({ icon: "👤", text: `${topComp.name} concentra ${topComp.crit} processos críticos pela régua global de SLA e entrega. Priorizar redistribuição.`, color: "#c0392b" });
+                if (!loginArea && topComp && topComp.crit > 3) opsInsights.push({ icon: "👤", text: `${topComp.name} concentra ${topComp.crit} processos críticos. Priorizar redistribuição.`, color: "#c0392b" });
                 if (loginArea && opsCriticos.length > 0) opsInsights.push({ icon: "⚠️", text: `${opsCriticos.length} processo(s) da área ${loginArea} estão críticos pela combinação SLA + entrega. Verificar priorização junto ao GAQ.`, color: "#c0392b" });
-                const topArea = areaArr.sort((a,b) => b.crit - a.crit)[0];
-                if (topArea && topArea.crit > 3) opsInsights.push({ icon: "🏢", text: `Área "${topArea.name}" tem ${topArea.crit} processos críticos. Possível problema na especificação ou complexidade dos objetos desta área.`, color: "#e67e22" });
+                const paradosTotal = emAF.filter(r => r.diasParado > 15).length;
+                if (paradosTotal > 5) opsInsights.push({ icon: "⏸", text: `${paradosTotal} processos estagnados (>15 d.u. sem movimentação). Verificar pendências e destravar.`, color: "#e67e22" });
                 if (mediaAging > 50) opsInsights.push({ icon: "⏱", text: `Aging médio de ${mediaAging} d.u. está elevado. Meta recomendada: abaixo de 50 d.u.`, color: "#c0392b" });
-                if (semPedido > emAF.length * 0.3 && semPedido > 5) opsInsights.push({ icon: "📦", text: `${semPedido} processos (${Math.round((semPedido/emAF.length)*100)}%) ainda sem envio de pedido. Verificar gargalos no fluxo de aprovação e formalização.`, color: "#e67e22" });
+                if (semPedido > emAF.length * 0.3 && semPedido > 5) opsInsights.push({ icon: "📦", text: `${semPedido} processos (${Math.round((semPedido/emAF.length)*100)}%) ainda sem envio de pedido. Verificar gargalos no fluxo de aprovação.`, color: "#e67e22" });
                 if (opsInsights.length === 0) opsInsights.push({ icon: "✅", text: "Indicadores operacionais dentro dos parâmetros para os filtros selecionados.", color: "#27ae60" });
                 return opsInsights.map((ins, i) => (
-                  <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "7px 0", borderBottom: "1px solid var(--border2)" }}>
+                  <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "7px 0", borderBottom: i < opsInsights.length - 1 ? "1px solid var(--gaq-line)" : "none" }}>
                     <span style={{ fontSize: 16 }}>{ins.icon}</span>
                     <span style={{ fontSize: 12, color: ins.color, fontWeight: 500 }}>{ins.text}</span>
                   </div>
