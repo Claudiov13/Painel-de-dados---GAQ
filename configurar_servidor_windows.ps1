@@ -22,6 +22,15 @@ if ($NodeCommand) {
     $NodePath = $NodeCommand.Source
 } else {
     $NodePath = $NodeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $NodePath) {
+        $NodePath = Get-ChildItem -LiteralPath $Projeto -Recurse -Filter node.exe -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.FullName -like (Join-Path $Projeto "node-portable\*") -or
+                $_.FullName -like (Join-Path $Projeto "nodejs\*") -or
+                $_.FullName -like (Join-Path $Projeto "tools\node\*")
+            } |
+            Select-Object -First 1 -ExpandProperty FullName
+    }
 }
 
 if (-not $NodePath) {

@@ -5019,12 +5019,16 @@ PERGUNTA DO USUÁRIO: ${q}`;
               </>}
               {/* ── Visão da Área (perfil área bloqueado) ── */}
               {loginArea && areaAnoData.length > 0 && (() => {
-                const areaActiveRows = fBack.filter(r => r.emA);
+                const aNorm = nrm(loginArea);
+                const areaAllProcs = base.filter(r => nrm(r["Área Requisitante"] || r.Area || r["ÁREA"] || "").includes(aNorm));
+                const areaActiveRows = areaAllProcs.filter(r => r.emA);
+                const areaDoneRows = areaAllProcs.filter(r => !r.emA);
                 const totalAnd = areaActiveRows.length;
-                const totalConc = fBack.filter(r => !r.emA).length;
+                const totalConc = areaDoneRows.length;
                 const criticos = areaActiveRows.filter(r => calcSLAClassification(r, phaseIntervals)?.bucket === "critico").length;
-                const mediaGeral = fBack.filter(r => !r.emA && r.diasTotais > 0).length
-                  ? Math.round(fBack.filter(r => !r.emA && r.diasTotais > 0).reduce((s,r) => s + r.diasTotais, 0) / fBack.filter(r => !r.emA && r.diasTotais > 0).length)
+                const concComDias = areaDoneRows.filter(r => r.diasTotais > 0);
+                const mediaGeral = concComDias.length
+                  ? Math.round(concComDias.reduce((s,r) => s + r.diasTotais, 0) / concComDias.length)
                   : null;
                 const anoAtual = new Date().getFullYear();
                 const dAtual = areaAnoData.find(d => d.ano == anoAtual);
@@ -5037,22 +5041,31 @@ PERGUNTA DO USUÁRIO: ${q}`;
                   <div className="anim-card anim-d4" style={{ marginBottom: 12 }}>
                     {/* Header da área */}
                     <div style={{ background: "linear-gradient(135deg, #4a235a 0%, #8e44ad 100%)", borderRadius: 12, padding: "16px 22px", marginBottom: 12, color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div>
-                        <div style={{ fontSize: 16, fontWeight: 800 }}>🏛 Área {loginArea} — Acompanhamento de Processos</div>
-                        <div style={{ fontSize: 10, opacity: .75, marginTop: 3 }}>Visualização restrita · Processos da área {loginArea} · Painel de Dados de Compras GAQ</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.95 }}>
+                          <path d="M3 21h18"/><path d="M5 21V8l7-4 7 4v13"/><path d="M9 21v-6h6v6"/><path d="M9 11h.01"/><path d="M15 11h.01"/>
+                        </svg>
+                        <div>
+                          <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: "-0.01em" }}>Área {loginArea} — Acompanhamento de Processos</div>
+                          <div style={{ fontSize: 10, opacity: .75, marginTop: 3 }}>Visualização restrita · Processos da área {loginArea} · Painel de Dados de Compras GAQ</div>
+                        </div>
                       </div>
                       {tendencia && <div style={{ background: "rgba(255,255,255,0.15)", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 700 }}>{tendencia.txt}</div>}
                     </div>
                     {/* KPIs resumo */}
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 12 }}>
                       {[
-                        { label: "Em andamento", val: totalAnd, icon: "▶", color: "#2e86c1" },
-                        { label: "Concluídos (total)", val: totalConc, icon: "✓", color: "#27ae60" },
-                        { label: "Críticos SLA + entrega", val: criticos, icon: "⚠", color: "#c0392b" },
-                        { label: "Média d.u. (concluídos)", val: mediaGeral !== null ? mediaGeral + " d.u." : "—", icon: "⏱", color: "#8e44ad" },
+                        { label: "Em andamento", val: totalAnd, color: "#2e86c1",
+                          icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2e86c1" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg> },
+                        { label: "Concluídos (total)", val: totalConc, color: "#27ae60",
+                          icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#27ae60" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="8 12.5 11 15.5 16 9.5"/></svg> },
+                        { label: "Críticos SLA + entrega", val: criticos, color: "#c0392b",
+                          icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#c0392b" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3 L21.5 20 L2.5 20 Z"/><line x1="12" y1="10" x2="12" y2="14"/><line x1="12" y1="17" x2="12" y2="17.01"/></svg> },
+                        { label: "Média d.u. (concluídos)", val: mediaGeral !== null ? mediaGeral + " d.u." : "—", color: "#8e44ad",
+                          icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8e44ad" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="13" r="8"/><path d="M9 2h6"/><path d="M12 9v4l2.5 1.5"/></svg> },
                       ].map(k => (
                         <div key={k.label} style={{ background: "var(--card)", borderRadius: 10, padding: "14px 16px", boxShadow: "var(--shadow)", borderTop: `3px solid ${k.color}`, textAlign: "center" }}>
-                          <div style={{ fontSize: 18, marginBottom: 4 }}>{k.icon}</div>
+                          <div style={{ display: "flex", justifyContent: "center", marginBottom: 6, height: 22 }}>{k.icon}</div>
                           <div style={{ fontSize: 22, fontWeight: 800, color: k.color }}>{k.val}</div>
                           <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>{k.label}</div>
                         </div>
@@ -5060,7 +5073,10 @@ PERGUNTA DO USUÁRIO: ${q}`;
                     </div>
                     {/* Histórico por ano */}
                     <div style={{ background: "var(--card)", borderRadius: 10, padding: "16px 18px", boxShadow: "var(--shadow)" }}>
-                      <div style={{ fontWeight: 700, fontSize: 13, color: "#8e44ad", marginBottom: 12 }}>📊 Histórico de Processos por Ano — Área {loginArea}</div>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: "#8e44ad", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8e44ad" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="20" x2="21" y2="20"/><rect x="5" y="11" width="3.5" height="9"/><rect x="10.25" y="6" width="3.5" height="14"/><rect x="15.5" y="3" width="3.5" height="17"/></svg>
+                        Histórico de Processos por Ano — Área {loginArea}
+                      </div>
                       <div style={{ overflowX: "auto" }}>
                         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                           <thead>

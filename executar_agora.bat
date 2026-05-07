@@ -23,4 +23,4 @@ if %ERRORLEVEL% EQU 0 (
 
 echo.
 echo  Esta janela fechara em 5 segundos...
-timeout /t 5 >nul
+powershell -NoProfile -Command "Start-Sleep -Seconds 5"

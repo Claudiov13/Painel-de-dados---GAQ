@@ -15,7 +15,7 @@ var PERFIS_ACESSO = {
 
 // Perfis Master — visão total com acesso destacado a Qualidade de Dados
 var ADMIN_MASTER_PERFIS = {
-  "GAQ@Master#26": { nome: "Admin Master" },
+  "AdminGAQ@": { nome: "Admin Master" },
 };
 
 // Senha do painel de Gestão/Performance (aba separada, acesso restrito)

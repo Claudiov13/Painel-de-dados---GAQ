@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-05-06
+
+### Ambiente local e servidor
+- Atualizacao de `gerar_dados_js.ps1` para localizar a base no novo OneDrive corporativo.
+- Inclusao de leitura direta do `.xlsx` quando a automacao COM do Excel nao estiver disponivel.
+- Ajuste de `executar_agora.bat` para evitar erro de `timeout` em execucoes nao interativas.
+- Atualizacao de `INICIAR_SERVIDOR.bat` para usar `iniciar_servidor.ps1`, removendo dependencia do caminho antigo `%USERPROFILE%\node\bin\node.exe`.
+- README expandido com instrucoes de atualizacao de dados, servidor local, tarefa agendada no boot e repositorio GitHub.
+
 ## 2026-04-30
 
 ### Visao Geral

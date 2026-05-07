@@ -10,10 +10,13 @@ Como subir o servidor sem instalar Node.js no Windows
 
 3. No final, este arquivo precisa existir:
    - node-portable\node.exe
+   - node-portable\node-vXX.XX.X-win-x64\node.exe
    ou
    - nodejs\node.exe
+   - nodejs\node-vXX.XX.X-win-x64\node.exe
    ou
    - tools\node\node.exe
+   - tools\node\node-vXX.XX.X-win-x64\node.exe
 
 4. Para iniciar o servidor manualmente:
    powershell -ExecutionPolicy Bypass -File ".\iniciar_servidor.ps1"
