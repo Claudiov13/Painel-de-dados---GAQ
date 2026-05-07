@@ -36,6 +36,8 @@
   <script src="./config.js"></script>
   <script src="./core.js"></script>
   <script src="./reports.js"></script>
+  <script>window.IA_API_KEY = window.IA_API_KEY || "";</script>
+  <script src="./apikey.js" onerror="console.info('apikey.js não encontrado — IA Insights ficará desabilitada')"></script>
   <script>
 // Auto-reload de dados.js / tags.js com cache-bust (funciona em file:// e http://)
 window.__reloadPainelScripts = function(){
@@ -374,7 +376,7 @@ const DrillDownPanel = ({
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 10 }}>
                       <span style={pillStyle("var(--gaq-text-3)", "var(--gaq-bg-2)")}>{r.ProcessKey || "Sem chave"}</span>
                       {r.NumRC && <span style={pillStyle("var(--gaq-blue)", "rgba(46,134,193,0.12)")}>{watched ? "Olho " : ""}{r.NumRC}</span>}
-                      {r.TicketSD && <span style={pillStyle("var(--gaq-green)", "rgba(52,199,89,0.12)")}>SD {r.TicketSD}</span>}
+                      {r.TicketSD && <span style={pillStyle("var(--gaq-green)", "rgba(52,199,89,0.12)")}>Pré-compra {r.TicketSD}</span>}
                       <span style={pillStyle("var(--gaq-text-2)", "rgba(15,23,42,0.06)")}>{r.Modalidade || "Sem modalidade"}</span>
                       <span style={pillStyle("var(--gaq-text-2)", "rgba(15,23,42,0.06)")}>{owner}</span>
                     </div>
@@ -555,7 +557,7 @@ const PantanalModal = ({ proc, onClose }) => {
   const [cpTeams, setCpTeams] = React.useState(false);
   const [cpEmail, setCpEmail] = React.useState(false);
   const hoje = new Date(); hoje.setHours(0,0,0,0);
-  // Aging oficial: desde Recebimento RC (ou SD se não há RC)
+  // Aging oficial: desde Recebimento RC (ou pré-compra se não há RC)
   const diasAberto = proc.aberturaRC ? du(proc.aberturaRC, hoje) : (proc.aberturaSD ? du(proc.aberturaSD, hoje) : 0);
   const ageColor = diasAberto < 20 ? "#1e8449" : diasAberto < 50 ? "#e67e22" : "#c0392b";
   const ageBg   = diasAberto < 20 ? "#eafaf1" : diasAberto < 50 ? "#fef9e7" : "#fdf0f0";
@@ -580,10 +582,10 @@ const PantanalModal = ({ proc, onClose }) => {
 
 Aqui é da equipe de Compras do SESC Pantanal. Identificamos o processo abaixo como uma oportunidade de adesão para nós:
 
-📋 SD: ${proc.TicketSD || proc.NumRC || "—"}${numProc}
+📋 Pré-compra: ${proc.TicketSD || proc.NumRC || "—"}${numProc}
 🏷️ Objeto: ${(proc.Objeto || "").slice(0, 180)}
 🏛️ Área: ${areaReq || "—"}
-📅 Abertura SD: ${dtAb}
+📅 Abertura pré-compra: ${dtAb}
 
 Gostaríamos de solicitar a inclusão do SESC Pantanal como aderente nesta contratação, junto ao Departamento Nacional – GAQ.
 
@@ -592,7 +594,7 @@ Poderia nos orientar sobre os próximos passos?
 Grato(a) desde já! 🙏
 SESC Pantanal – Equipe de Compras`;
 
-  const emailSubject = `Solicitação de Adesão – SD ${proc.TicketSD || proc.NumRC || "—"} | ${(proc.Objeto || "").slice(0, 55)}`;
+  const emailSubject = `Solicitação de Adesão – Pré-compra ${proc.TicketSD || proc.NumRC || "—"} | ${(proc.Objeto || "").slice(0, 55)}`;
   const emailBody =
 `Prezado(a) ${mainResp},
 
@@ -600,10 +602,10 @@ Meu nome é __________, da equipe de Compras do SESC Pantanal.
 
 Identificamos o processo a seguir como uma oportunidade de adesão de nosso interesse:
 
-  • Nº SD: ${proc.TicketSD || proc.NumRC || "—"}${numProc}
+  • Nº Pré-compra: ${proc.TicketSD || proc.NumRC || "—"}${numProc}
   • Objeto: ${proc.Objeto || "—"}
   • Área Requisitante: ${areaReq || "—"}
-  • Abertura SD: ${dtAb}
+  • Abertura pré-compra: ${dtAb}
   • Fase atual: ${proc.faseAtual || "—"}
 
 Solicitamos, gentilmente, a avaliação da viabilidade de inclusão do SESC Pantanal como aderente nesta contratação, a ser formalizada junto ao Departamento Nacional – GAQ.
@@ -638,7 +640,7 @@ SESC Pantanal – Equipe de Compras`;
             <div style={{ fontSize: 11, opacity: .85, lineHeight: 1.55, maxWidth: 540 }}>{(proc.Objeto || "Sem descrição").slice(0, 200)}{(proc.Objeto||"").length > 200 ? "…" : ""}</div>
             <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
               {proc.Modalidade && <span style={{ background: "rgba(255,255,255,0.2)", borderRadius: 5, padding: "2px 10px", fontSize: 10, fontWeight: 700 }}>{proc.Modalidade}</span>}
-              <span style={{ background: ageBg, color: ageColor, borderRadius: 5, padding: "2px 10px", fontSize: 10, fontWeight: 800 }}>⏱ {diasAberto} d.u. {proc.aberturaRC ? "(desde RC)" : "(desde SD)"}</span>
+              <span style={{ background: ageBg, color: ageColor, borderRadius: 5, padding: "2px 10px", fontSize: 10, fontWeight: 800 }}>⏱ {diasAberto} d.u. {proc.aberturaRC ? "(desde RC)" : "(desde pré-compra)"}</span>
               {proc.faseAtual && proc.faseAtual !== "—" && <span style={{ background: "rgba(255,255,255,0.18)", borderRadius: 5, padding: "2px 10px", fontSize: 10 }}>📍 {proc.faseAtual}</span>}
             </div>
           </div>
@@ -668,9 +670,9 @@ SESC Pantanal – Equipe de Compras`;
             <div style={{ fontSize: 10, fontWeight: 700, color: "#1e8449", textTransform: "uppercase", letterSpacing: .6, marginBottom: 10 }}>📋 Informações do Processo</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 8, fontSize: 12 }}>
               {[
-                ["Nº SD", proc.TicketSD || proc.NumRC], ["Nº RC", proc.NumRC || "—"],
+                ["Nº Pré-compra", proc.TicketSD || proc.NumRC], ["Nº RC", proc.NumRC || "—"],
                 ["Modalidade", proc.Modalidade], ["Área", proc["Área Requisitante"]],
-                ["Abertura SD", dtAb], [proc.aberturaRC ? "Em aberto (desde RC)" : "Em aberto (desde SD)", `${diasAberto} d.u.`],
+                ["Abertura pré-compra", dtAb], [proc.aberturaRC ? "Em aberto (desde RC)" : "Em aberto (desde pré-compra)", `${diasAberto} d.u.`],
                 ["Fase atual", proc.faseAtual || "—"], ["Nº Processo", proc.NumProcesso || "—"],
               ].map(([lbl, val]) => (
                 <div key={lbl} style={{ background: "var(--card2)", borderRadius: 7, padding: "8px 12px", border: "1px solid var(--border2)" }}>
@@ -836,10 +838,10 @@ const TimelineModal = ({ proc, onClose, onOpenTags, onUpdate, phaseIntervals, on
               {proc.Objeto ? proc.Objeto.slice(0, 80) : ""}
               {proc.Objeto && proc.Objeto.length > 80 && <span style={{ opacity: .6, marginLeft: 4, fontSize: 9 }}>(...clique p/ ver completo)</span>}
             </div>
-            {/* Chips copiáveis: RC, SD, Nº Processo */}
+            {/* Chips copiáveis: RC, pré-compra, Nº Processo */}
             <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 3, marginBottom: 4 }}>
               {proc.NumRC && <CopyChip label="RC" value={proc.NumRC} color="#2e86c1" />}
-              {proc.TicketSD && <CopyChip label="SD" value={proc.TicketSD} color="#27ae60" />}
+              {proc.TicketSD && <CopyChip label="Pré-compra" value={proc.TicketSD} color="#27ae60" />}
               {proc.NumProcesso && <CopyChip label="Nº Processo" value={proc.NumProcesso} color="#8e44ad" />}
             </div>
             <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 2 }}>
@@ -1012,7 +1014,7 @@ const ProcCard = ({ r, tipo, onClickComp, onClickProc, onOpenTags, tagVersion, o
             {watched && <span style={{ fontSize: 11, color: "#f39c12" }} title="Na watchlist">👁</span>}
             <span className="list-chip-cta" style={{ fontSize: 9, color: "var(--text3)" }}>{r.ProcessKey || "—"}</span>
             <span className="list-chip-cta" style={{ cursor: "pointer" }} onClick={() => onClickProc(r)}>{r.NumRC || "—"}</span>
-            {r.TicketSD && <span className="list-chip-cta" style={{ color: "#27ae60" }}>SD: {r.TicketSD}</span>}
+            {r.TicketSD && <span className="list-chip-cta" style={{ color: "#27ae60" }}>Pré-compra: {r.TicketSD}</span>}
             {r["Área Requisitante"] && <span className="list-chip-cta" style={{ color: "#2e86c1" }}>{r["Área Requisitante"]}</span>}
             <span className="list-chip-cta" style={{ color: "#2e86c1" }}>{r.Modalidade || "—"}</span>
             {r.isLegado && <span style={{ fontSize: 9, background: "#ecf0f1", color: "#7f8c8d", borderRadius: 4, padding: "1px 6px", fontWeight: 700 }}>📦 Legado</span>}
@@ -1157,7 +1159,7 @@ function App() {
   const slideshowRef = useRef(null);
   const slideshowTickRef = useRef(null);
   const SLIDESHOW_ABAS = ["overview", "executivo", "operacional", "dirTimeline", "cronograma", "alertaSD", "alertaRC", "mapeamento", "planejamento"];
-  const SLIDESHOW_LABELS = { overview: "Visão Geral", executivo: "Executivo", operacional: "Operacional", dirTimeline: "Timeline", cronograma: "Cronograma", alertaRC: "Alerta RC", alertaSD: "Alerta SD", mapeamento: "Mapeamento", planejamento: "Planejamento" };
+  const SLIDESHOW_LABELS = { overview: "Visão Geral", executivo: "Executivo", operacional: "Operacional", dirTimeline: "Timeline", cronograma: "Cronograma", alertaRC: "Alerta RC", alertaSD: "Alerta Pré-compra", mapeamento: "Mapeamento", planejamento: "Planejamento" };
   const [spotlight, setSpotlight] = useState(false);
   const spotlightRef = useRef(null);
   const SENHA_CORRETA = "GAQ2026";
@@ -1415,8 +1417,16 @@ useEffect(() => {
   const [pgCpl, setPgCpl] = useState(1); const [pgCplSz, setPgCplSz] = useState(20);
   const [pgAlertRC, setPgAlertRC] = useState(1); const [pgAlertRCSz, setPgAlertRCSz] = useState(20);
   const [pgAlertSD, setPgAlertSD] = useState(1); const [pgAlertSDSz, setPgAlertSDSz] = useState(20);
+  const [pgAlertSDEnc, setPgAlertSDEnc] = useState(1); const [pgAlertSDEncSz, setPgAlertSDEncSz] = useState(20);
   const [pgAll, setPgAll] = useState(1); const [pgAllSz, setPgAllSz] = useState(50);
   const [sortAll, setSortAll] = useState({ col: "diasTotais", dir: "desc" });
+
+  // ── IA Insights (Gemini) — chave carregada via apikey.js (gitignored) ──
+  const iaDisponivel = !!(typeof window !== "undefined" && window.IA_API_KEY);
+  const [iaQuestion, setIaQuestion] = useState("");
+  const [iaLoading, setIaLoading] = useState(false);
+  const [iaConversa, setIaConversa] = useState([]); // [{ role: "user"|"ia", text }]
+  const [iaError, setIaError] = useState("");
 
   useEffect(() => { document.documentElement.setAttribute("data-theme", dark ? "dark" : "light"); }, [dark]);
 
@@ -1517,7 +1527,7 @@ useEffect(() => {
           icon: "RC",
           color: "var(--gaq-green)",
           title: "Recebeu RC",
-          detail: `${snap.label} saiu da triagem SD`,
+          detail: `${snap.label} saiu da triagem pré-compra`,
           stamp: stampLabel(snap.ultimaDataMs),
           sortAt: snap.ultimaDataMs || Date.now(),
           weight: 80,
@@ -2030,7 +2040,7 @@ useEffect(() => {
     const procs = base.filter(r => nrm(r["Área Requisitante"] || r.Area || r["ÁREA"] || "").includes(a));
     const byAno = {};
     procs.forEach(r => {
-      const dt = r.aberturaSd || r.aberturaRc;
+      const dt = r.aberturaSD || r.aberturaRC;
       if (!dt) return;
       let ano; try { ano = new Date(dt).getFullYear(); } catch { return; }
       if (isNaN(ano) || ano < 2019 || ano > 2030) return;
@@ -2077,6 +2087,9 @@ useEffect(() => {
   const alertRC = useMemo(() => fBack.filter(r => r.NumRC && r.NumRC.trim() !== "").sort(sortAlertRCDesc), [fBack]);
   // ── Alerta SD: em andamento COM SD mas SEM RC, ordenado por aging do SD ──
   const alertSD = useMemo(() => fBack.filter(r => r.TicketSD && r.TicketSD.trim() !== "" && (!r.NumRC || r.NumRC.trim() === "")).sort(sortAlertSDDesc), [fBack]);
+  // ── SD dividido: em andamento (sem encerramento) vs encerrado aguardando RC pela área ──
+  const alertSDAberto = useMemo(() => alertSD.filter(r => !r.encSD).sort((a, b) => (b.diasSDAberto || 0) - (a.diasSDAberto || 0)), [alertSD]);
+  const alertSDEncerrado = useMemo(() => alertSD.filter(r => !!r.encSD).sort((a, b) => (b.diasDesdeEncSD || 0) - (a.diasDesdeEncSD || 0)), [alertSD]);
   const dirScopedBase = useMemo(() => {
     if (!isDiretor) return [];
     if (!dirAreaSel) return base;
@@ -2185,7 +2198,8 @@ useEffect(() => {
   }, [isDiretor, dirScopedBase, phaseIntervals]);
   // Reset paginação quando filtros mudam (evita página fora do range)
   useEffect(() => { setPgAlertRC(1); }, [alertRC]);
-  useEffect(() => { setPgAlertSD(1); }, [alertSD]);
+  useEffect(() => { setPgAlertSD(1); }, [alertSDAberto]);
+  useEffect(() => { setPgAlertSDEnc(1); }, [alertSDEncerrado]);
   const pregoeirosCPL = useMemo(() => [...new Set(cplBack.map(r => r.Pregoeiro).filter(Boolean))], [cplBack]);
   const mediaCPL = useMemo(() => { const p = cplBack.filter(r => r.diasCpl > 0); return p.length ? Math.round(p.reduce((s,r) => s + r.diasCpl, 0) / p.length) : 0; }, [cplBack]);
 
@@ -2599,7 +2613,7 @@ const topModLentas = (() => {
       bg: "#eef6ff",
       lines: [
         "Mostra todos os processos em andamento no recorte atual.",
-        "Inclui processos ainda só em SD e processos que já receberam RC.",
+        "Inclui processos ainda só em pré-compra e processos que já receberam RC.",
       ],
     },
     atrasados_sla: {
@@ -2608,7 +2622,7 @@ const topModLentas = (() => {
       bg: "#fdf0ee",
       lines: [
         "Considera apenas SLA não cumprido.",
-        "SD sem RC: entra quando o SD fica aberto por mais de 10 dias úteis.",
+        "Pré-compra sem RC: entra quando fica aberta por mais de 10 dias úteis.",
         "Processos com RC: entra quando os dias do processo passam do prazo geral da modalidade.",
         "A data de entrega não entra sozinha nesta caixa.",
       ],
@@ -2652,7 +2666,7 @@ const topModLentas = (() => {
       bg: "#eef6ff",
       lines: [
         "Mostra todos os processos em andamento no recorte atual.",
-        "Inclui processos ainda só em SD e processos que já receberam RC.",
+        "Inclui processos ainda só em pré-compra e processos que já receberam RC.",
       ],
     },
     atrasados_sla: {
@@ -2661,7 +2675,7 @@ const topModLentas = (() => {
       bg: "#fdf0ee",
       lines: [
         "Considera apenas prazo de SLA não cumprido.",
-        "SD sem RC: entra quando o SD fica aberto por mais de 10 dias úteis.",
+        "Pré-compra sem RC: entra quando fica aberta por mais de 10 dias úteis.",
         "Processos com RC: entra quando o aging da RC passa de 30 ou 90 dias, conforme a modalidade.",
         "A data de entrega não altera esta caixa.",
       ],
@@ -2673,7 +2687,7 @@ const topModLentas = (() => {
       lines: [
         "Crítico exige as duas condições ao mesmo tempo: SLA vencido e entrega ou cronograma rompidos.",
         "Para RC, a entrega fica crítica quando a projeção de conclusão passa da data prevista ou a entrega já venceu.",
-        "Para SD sem RC, a entrega é avaliada pelo pior cenário de 90 dias úteis.",
+        "Para pré-compra sem RC, a entrega é avaliada pelo pior cenário de 90 dias úteis.",
         "Casos próximos do crítico ficam em Atenção e não entram nesta caixa.",
       ],
     },
@@ -2683,7 +2697,7 @@ const topModLentas = (() => {
       bg: "#eefaf2",
       lines: [
         "Mostra os processos em andamento que ainda estão dentro do prazo simples de SLA.",
-        "Para SD, considera os 10 dias úteis da pré-compra. Para RC, considera 30 ou 90 dias conforme a modalidade.",
+        "Para pré-compra, considera 10 dias úteis. Para RC, considera 30 ou 90 dias conforme a modalidade.",
         "Esta caixa pode incluir processos em Atenção, desde que o SLA ainda não tenha vencido.",
         `O histórico concluído dentro do prazo continua a ser acompanhado e hoje está em ${overviewAdmin ? overviewAdmin.slaCumprido : 0}%.`,
       ],
@@ -2790,7 +2804,7 @@ const topModLentas = (() => {
 
     const semaforo = [
       { label: "Crítico", rows: criticoRows, color: "#d35400", detail: "SLA vencido e entrega ou cronograma rompidos." },
-      { label: "Atenção", rows: atencaoRows, color: "#ff9500", detail: "Margem curta para SLA ou entrega. SD sem RC não entra aqui." },
+      { label: "Atenção", rows: atencaoRows, color: "#ff9500", detail: "Margem curta para SLA ou entrega. Pré-compra sem RC não entra aqui." },
       { label: "SLA Vencido", rows: slaVencidoRows, color: "#ff3b30", detail: "Fora do SLA, mas ainda com cronograma de entrega preservado." },
       { label: "SLA Atendido", rows: regularRows, color: "#34c759", detail: "Dentro do SLA da modalidade e dentro da entrega prevista." },
     ];
@@ -2918,7 +2932,8 @@ const topModLentas = (() => {
   const qualityData = useMemo(() => {
     if (!base.length) return null;
 
-    const rows = fBase;
+    // Avalia toda a base acessível (baseVis), ignorando filtros de UI — qualidade é métrica global, não de recorte
+    const rows = baseVis;
     const rowKey = (r) => r ? (r.ProcessKey || `${r.NumRC || ""}|${r.TicketSD || ""}|${r.Objeto || ""}`) : "";
     const addDecor = (list, issueKey, detailFn) => list.map(r => ({
       ...r,
@@ -2949,6 +2964,8 @@ const topModLentas = (() => {
     };
 
     const dateOrderIssues = rows.flatMap(r => {
+      // Cancelados/fracassados podem ter ordem de datas atípica por conta do encerramento — ignorar
+      if (r.isCanceled || r.isFailed) return [];
       const modNrm = nrm(r.Modalidade || "");
       const idxs = r.NumRC ? getTLColsForMod(modNrm) : [0, 1, 2];
       let prevDate = null;
@@ -2985,8 +3002,8 @@ const topModLentas = (() => {
         label: "RC sem recebimento",
         severity: "critical",
         color: "#c0392b",
-        desc: "Processos com RC aberta, mas sem data de recebimento da RC.",
-        rows: addDecor(rows.filter(r => r.NumRC && !r.aberturaRC), "rc_sem_recebimento", "RC sem data de recebimento."),
+        desc: "Processos com RC aberta, mas sem data de recebimento da RC. Cancelados/fracassados são excluídos.",
+        rows: addDecor(rows.filter(r => r.NumRC && !r.aberturaRC && !r.isCanceled && !r.isFailed), "rc_sem_recebimento", "RC sem data de recebimento."),
       },
       {
         key: "duplicidade_rc",
@@ -3009,8 +3026,8 @@ const topModLentas = (() => {
         label: "RC sem modalidade",
         severity: "attention",
         color: "#ff9500",
-        desc: "RCs sem modalidade impedem SLA e cronograma correctos.",
-        rows: addDecor(rows.filter(r => r.NumRC && !(r.Modalidade || "").toString().trim()), "rc_sem_modalidade", "RC sem modalidade informada."),
+        desc: "RCs sem modalidade impedem SLA e cronograma correctos. Cancelados/fracassados são excluídos.",
+        rows: addDecor(rows.filter(r => r.NumRC && !(r.Modalidade || "").toString().trim() && !r.isCanceled && !r.isFailed), "rc_sem_modalidade", "RC sem modalidade informada."),
       },
       {
         key: "ativo_sem_entrega",
@@ -3030,10 +3047,10 @@ const topModLentas = (() => {
       },
       {
         key: "duplicidade_sd",
-        label: "Ticket SD duplicado",
+        label: "Ticket pré-compra duplicado",
         severity: "attention",
         color: "#5dade2",
-        desc: "Mesmo ticket SD encontrado em mais de um registo do recorte.",
+        desc: "Mesmo ticket de pré-compra encontrado em mais de um registo do recorte.",
         rows: duplicateRows("TicketSD"),
       },
     ].map(issue => ({ ...issue, rows: uniqRows(issue.rows), count: uniqRows(issue.rows).length }));
@@ -3076,7 +3093,7 @@ const topModLentas = (() => {
       bySubarea,
       topExamples: allIssueRows.slice(0, 12),
     };
-  }, [base, fBase, fBack]);
+  }, [base, baseVis, fBack]);
 
   const allProcesses = useMemo(() => {
     let arr = [...fBase];
@@ -3121,10 +3138,108 @@ const topModLentas = (() => {
   function crossFilter(key, val) { if (key === "resp") setFComp(val); if (key === "area") setFArea(val); if (key === "mod") setFMod(val); }
   function toggleSort(col) { setSortAll(prev => ({ col, dir: prev.col === col && prev.dir === "desc" ? "asc" : "desc" })); setPgAll(1); }
 
+  // ── IA Insights: monta contexto + chama Gemini ──
+  function buildIAContext() {
+    const ativos = baseVis.filter(r => r.emA);
+    const concl = baseVis.filter(r => r.isConcluded);
+    const canc = baseVis.filter(r => r.isCanceled);
+    const frac = baseVis.filter(r => r.isFailed);
+    const slaVencido = ativos.filter(r => r.atrasoGeral || r.atrasoSD);
+    const criticosRC = ativos.filter(r => (r.diasTotaisGestao||0) > 100);
+    const sdSemRC = ativos.filter(r => r.TicketSD && !r.NumRC);
+    const sdEncSemRC = sdSemRC.filter(r => r.encSD);
+
+    // Agrupar por área e modalidade
+    const porArea = {}; ativos.forEach(r => { const a = r["Área Requisitante"] || "N/I"; porArea[a] = (porArea[a]||0)+1; });
+    const porMod = {}; ativos.forEach(r => { const m = r.Modalidade || "N/I"; porMod[m] = (porMod[m]||0)+1; });
+    const topAreas = Object.entries(porArea).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([k,v])=>`${k}: ${v}`).join("; ");
+    const topMods = Object.entries(porMod).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([k,v])=>`${k}: ${v}`).join("; ");
+
+    // Top 30 processos críticos com info reduzida (para caber no contexto)
+    const topCriticos = ativos.slice().sort((a,b)=>(b.diasTotaisGestao||0)-(a.diasTotaisGestao||0)).slice(0,30).map(r => ({
+      rc: r.NumRC || "—",
+      sd: r.TicketSD || "—",
+      area: r["Área Requisitante"] || "—",
+      modalidade: r.Modalidade || "—",
+      status: r.statusDet || r.status || "—",
+      fase: r.faseAtual || "—",
+      respAtivo: r.respAtivo || "—",
+      diasRC: r.diasTotaisGestao || 0,
+      diasSD: r.diasSDAberto || r.diasSD || 0,
+      slaVencido: !!(r.atrasoGeral || r.atrasoSD),
+      objeto: (r.Objeto || "").slice(0, 200),
+    }));
+
+    return {
+      meta: { totalBase: baseVis.length, totalAtivos: ativos.length, totalConcluidos: concl.length, totalCancelados: canc.length, totalFracassados: frac.length, slaVencido: slaVencido.length, criticosRC: criticosRC.length, sdSemRC: sdSemRC.length, sdEncSemRC: sdEncSemRC.length },
+      distribuicao: { topAreas, topMods },
+      topCriticos,
+    };
+  }
+
+  async function askIA() {
+    const q = (iaQuestion || "").trim();
+    if (!q || iaLoading) return;
+    if (!window.IA_API_KEY) { setIaError("Chave de IA não configurada (apikey.js)."); return; }
+
+    setIaError("");
+    setIaLoading(true);
+    setIaConversa(prev => [...prev, { role: "user", text: q }]);
+
+    const ctx = buildIAContext();
+    const systemInstr = `Você é um assistente analítico do Painel GAQ (Gerência de Aquisições do Sesc), focado em compras públicas. Responda em português, de forma direta, objetiva e estruturada (use marcadores quando útil). Baseie suas respostas APENAS nos dados fornecidos em CONTEXTO. Se a pergunta não puder ser respondida com os dados, diga isso claramente. Inclua números, percentuais e referências a RC/SD quando relevante.
+
+CONTEXTO DA BASE:
+- Total de processos visíveis: ${ctx.meta.totalBase}
+- Em andamento: ${ctx.meta.totalAtivos}
+- Concluídos: ${ctx.meta.totalConcluidos} · Cancelados: ${ctx.meta.totalCancelados} · Fracassados: ${ctx.meta.totalFracassados}
+- Com SLA vencido (atraso): ${ctx.meta.slaVencido}
+- RC com aging > 100 d.u.: ${ctx.meta.criticosRC}
+- Pré-compra (SD) sem RC: ${ctx.meta.sdSemRC} (sendo ${ctx.meta.sdEncSemRC} já encerrados aguardando a área abrir RC)
+
+DISTRIBUIÇÃO POR ÁREA (top): ${ctx.distribuicao.topAreas}
+DISTRIBUIÇÃO POR MODALIDADE (top): ${ctx.distribuicao.topMods}
+
+TOP 30 PROCESSOS CRÍTICOS (ordenados por aging RC):
+${JSON.stringify(ctx.topCriticos, null, 2)}
+
+PERGUNTA DO USUÁRIO: ${q}`;
+
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(window.IA_API_KEY)}`;
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: systemInstr }] }],
+          generationConfig: { temperature: 0.3, maxOutputTokens: 1500 },
+        }),
+      });
+      if (!resp.ok) {
+        const errTxt = await resp.text();
+        throw new Error(`HTTP ${resp.status}: ${errTxt.slice(0, 300)}`);
+      }
+      const data = await resp.json();
+      let text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      if (!text) {
+        if (data.candidates?.[0]?.finishReason === "SAFETY") text = "Resposta bloqueada por filtro de segurança da IA.";
+        else if (data.promptFeedback?.blockReason) text = `Pergunta bloqueada: ${data.promptFeedback.blockReason}`;
+        else text = "Sem resposta.";
+      }
+      setIaConversa(prev => [...prev, { role: "ia", text }]);
+      setIaQuestion("");
+    } catch (e) {
+      setIaError("Falha ao consultar IA: " + (e.message || e));
+      setIaConversa(prev => [...prev, { role: "ia", text: "❌ Erro ao consultar IA. Verifique a chave em apikey.js e a conexão." }]);
+    } finally {
+      setIaLoading(false);
+    }
+  }
+
   const hasF = fAnoSD || fAnoRC || fMod || fArea || fSt || fStDet || fComp || fAval || fAnalista || fSubarea || fTag || fWatch;
   const activeFilters = useMemo(() => {
     const arr = [];
-    if (fAnoSD) arr.push({ key: "fAnoSD", label: "Ano SD", value: fAnoSD, clear: () => setFAnoSD("") });
+    if (fAnoSD) arr.push({ key: "fAnoSD", label: "Ano pré-compra", value: fAnoSD, clear: () => setFAnoSD("") });
     if (fAnoRC) arr.push({ key: "fAnoRC", label: "Ano RC", value: fAnoRC, clear: () => setFAnoRC("") });
     if (fMod) arr.push({ key: "fMod", label: "Modalidade", value: fMod.length > 18 ? fMod.slice(0,16)+"…" : fMod, clear: () => setFMod("") });
     if (fArea) arr.push({ key: "fArea", label: "Área", value: fArea.length > 18 ? fArea.slice(0,16)+"…" : fArea, clear: () => setFArea("") });
@@ -3141,9 +3256,9 @@ const topModLentas = (() => {
   const renderBuscaPanel = () => (
     <div className="gaq-card" style={{ marginBottom: 16, border: "1px solid var(--gaq-blue)" }}>
       <div style={{ fontWeight: 600, color: "var(--gaq-blue)", fontSize: 13, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-        <Icon name="search" size={14} color="var(--gaq-blue)" /> Busca por N RC, Ticket SD ou Objeto
+        <Icon name="search" size={14} color="var(--gaq-blue)" /> Busca por N RC, ticket pré-compra ou objeto
       </div>
-      <input value={busca} onChange={e => handleBuscaChange(e.target.value)} placeholder="Digite o codigo RC, numero do SD ou parte do objeto..."
+      <input value={busca} onChange={e => handleBuscaChange(e.target.value)} placeholder="Digite o codigo RC, numero da pré-compra ou parte do objeto..."
         className="gaq-input" style={{ width: "100%", padding: "10px 14px", fontSize: 13 }} />
       {buscaDefer.length >= 3 && (buscaResults.length === 0
         ? <div style={{ fontSize: 12, color: "var(--gaq-text-3)", marginTop: 6 }}>Nenhum resultado para "{buscaDefer}".</div>
@@ -3159,7 +3274,7 @@ const topModLentas = (() => {
                     <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", marginBottom: 3 }}>
                       <span style={{ fontSize: 9, color: "var(--gaq-text-3)", background: "var(--gaq-bg-2)", borderRadius: 3, padding: "0 4px" }}>{r.ProcessKey || "—"}</span>
                       <span style={{ fontWeight: 600, color: "var(--gaq-blue)", fontSize: 12 }}>{r.NumRC || "—"}</span>
-                      {r.TicketSD && <span style={{ fontSize: 10, color: "var(--gaq-green)" }}>SD: {r.TicketSD}</span>}
+                      {r.TicketSD && <span style={{ fontSize: 10, color: "var(--gaq-green)" }}>Pré-compra: {r.TicketSD}</span>}
                       <span style={{ fontSize: 10, color: "var(--gaq-ncl)" }}>{r.Modalidade || "—"}</span>
                       <span style={{ fontSize: 10, color: r.emA ? "var(--gaq-green)" : r.isConcluded ? "var(--gaq-blue)" : "var(--gaq-red)" }}>{r.status}</span>
                     </div>
@@ -3187,15 +3302,17 @@ const topModLentas = (() => {
       ["dirTimeline","clock","Timeline",null],
     ]},
     { label: "Riscos & Alertas", items: [
-      ["alertaSD","doc","Alerta SD",alertSD.length],
+      ["alertaSD","doc","Alerta Pré-compra",alertSD.length],
       ["alertaRC","shield","Alerta RC",alertRC.length],
     ]},
+    ...(iaDisponivel ? [{ label: "Inteligência", items: [["iaInsights","spark","IA Insights",null]] }] : []),
   ] : [
     { label: "Visão", items: [
       ...(isAdminMaster ? [["qualidade","settings","Qualidade de Dados",qualityData ? qualityData.totalIssues : 0]] : []),
       ["overview","grid","Visão Geral",null],
       ["executivo","spark","Executivo",null],
       ["operacional","chart","Operacional",null],
+      ...(isAdminMaster && iaDisponivel ? [["iaInsights","spark","IA Insights",null]] : []),
     ]},
     { label: "Processos", items: [
       ["processos","list","Processos",fBase.length],
@@ -3205,7 +3322,7 @@ const topModLentas = (() => {
     ]},
     { label: "Riscos & Alertas", items: [
       ["alertas","alert","Alertas",(alertNCL.length+alertCPL.length)],
-      ["alertaSD","doc","Alerta SD",alertSD.length],
+      ["alertaSD","doc","Alerta Pré-compra",alertSD.length],
       ["alertaRC","shield","Alerta RC",alertRC.length],
       ["mapeamento","map","Mapeamento",null],
     ]},
@@ -3220,9 +3337,10 @@ const topModLentas = (() => {
   const tabTitles = {
     upload: "Upload", overview: "Visão Geral", executivo: "Executivo", operacional: "Operacional", qualidade: "Qualidade de Dados",
     processos: "Processos", metro: "Linha do Metrô", dirTimeline: "Timeline", cronograma: "Cronograma",
-    alertas: "Alertas", alertaSD: "Alerta SD", alertaRC: "Alerta RC", mapeamento: "Mapeamento",
+    alertas: "Alertas", alertaSD: "Alerta Pré-compra", alertaRC: "Alerta RC", mapeamento: "Mapeamento",
     gestao: "Performance", planejamento: "Planejamento", pantanal: "Pantanal", nova: "Nova Demanda",
     bal: "Balanceamento", dirHome: "Painel Diretoria", dirDiag: "Diagnóstico",
+    iaInsights: "IA Insights",
   };
 
   return (
@@ -3534,7 +3652,7 @@ const topModLentas = (() => {
         {base.length > 0 && (
           <div className="pres-hide" style={{ maxHeight: showFilters ? 200 : 0, overflow: "hidden", transition: "max-height .25s ease-in-out, opacity .2s", opacity: showFilters ? 1 : 0, borderBottom: showFilters ? "1px solid var(--gaq-line)" : "none", flexShrink: 0 }}>
             <div style={{ padding: "12px 24px 14px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8, background: "var(--gaq-bg-2)" }}>
-              <Sel label="Ano SD" value={fAnoSD} onChange={setFAnoSD} opts={anosSD} />
+              <Sel label="Ano pré-compra" value={fAnoSD} onChange={setFAnoSD} opts={anosSD} />
               <Sel label="Ano RC" value={fAnoRC} onChange={setFAnoRC} opts={anosRC} />
               <Sel label="Modalidade" value={fMod} onChange={setFMod} opts={mods} />
               <Sel label="Área" value={fArea} onChange={setFArea} opts={areas} />
@@ -3623,7 +3741,7 @@ const topModLentas = (() => {
                   <th style={thS}>Comprador</th>
                   <th style={thS}>Prazo Entrega</th>
                   <th style={{ ...thS, textAlign: "center" }}>Dias (RC)</th>
-                  <th style={{ ...thS, textAlign: "center" }}>Dias (SD)</th>
+                  <th style={{ ...thS, textAlign: "center" }}>Dias (pré-compra)</th>
                 </tr>
               </thead>
               <tbody>
@@ -3688,8 +3806,8 @@ const topModLentas = (() => {
               {/* KPIs principais */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
                 {[
-                  { label: "SDs em Andamento", value: sdEmAndamento.length, sub: "Tickets SD sem RC aberta", color: "var(--gaq-blue)", click: null },
-                  { label: "SDs Concluidos sem RC", value: sdConcluidosSemRC.length, sub: "Clique para ver a lista", color: "var(--gaq-orange)", click: () => setShowSDList(s => !s) },
+                  { label: "Pré-compras em andamento", value: sdEmAndamento.length, sub: "Tickets de pré-compra sem RC aberta", color: "var(--gaq-blue)", click: null },
+                  { label: "Pré-compras concluídas sem RC", value: sdConcluidosSemRC.length, sub: "Clique para ver a lista", color: "var(--gaq-orange)", click: () => setShowSDList(s => !s) },
                   { label: "RCs em Andamento", value: rcEmAndamento.length, sub: "Processos com RC aberta", color: "var(--gaq-green)", click: null },
                 ].map(kpi => (
                   <div key={kpi.label} onClick={kpi.click} style={{
@@ -3707,21 +3825,21 @@ const topModLentas = (() => {
                 ))}
               </div>
 
-              {/* Lista SD concluidos sem RC (expandivel) */}
+              {/* Lista pré-compras concluídas sem RC (expandível) */}
               {showSDList && sdConcluidosSemRC.length > 0 && (
                 <div className="gaq-card" style={{ marginBottom: 20, borderTop: "3px solid var(--gaq-orange)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                    <div style={{ fontWeight: 600, fontSize: 14, color: "var(--gaq-orange)" }}>SDs Concluidos pela GAQ sem RC ({sdConcluidosSemRC.length})</div>
+                    <div style={{ fontWeight: 600, fontSize: 14, color: "var(--gaq-orange)" }}>Pré-compras concluídas pela GAQ sem RC ({sdConcluidosSemRC.length})</div>
                     <button className="gaq-icon-btn" onClick={() => setShowSDList(false)}><Icon name="x" size={14}/></button>
                   </div>
                   <table className="gaq-table" style={{ width: "100%", borderCollapse: "collapse" }}>
                     <thead>
                       <tr>
-                        <th style={thS}>Ticket SD</th>
+                        <th style={thS}>Ticket pré-compra</th>
                         <th style={{ ...thS, maxWidth: 250 }}>Objeto</th>
                         <th style={thS}>Area</th>
-                        <th style={thS}>Encerramento SD</th>
-                        <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase" }}>Dias (SD)</th>
+                        <th style={thS}>Encerramento pré-compra</th>
+                        <th style={{ padding: "8px 6px", textAlign: "center", fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase" }}>Dias (pré-compra)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -3926,9 +4044,9 @@ const topModLentas = (() => {
                   <div style={{ fontSize: 32, fontWeight: 800, color: "#8e44ad" }}>{diag.mediaScore}</div>
                   <div style={{ fontSize: 10, color: "var(--text3)" }}>Pressão combinada do pipeline</div>
                 </div>
-                <div onClick={() => openDrill(`Diagnóstico Diretoria — SD em triagem (${scopeLabel})`, diag.sdTriagem)}
+                <div onClick={() => openDrill(`Diagnóstico Diretoria — Pré-compra em triagem (${scopeLabel})`, diag.sdTriagem)}
                   style={{ flex: 1, minWidth: 150, background: "var(--card)", borderRadius: 12, padding: "16px 18px", boxShadow: "var(--shadow)", borderTop: "4px solid #16a085", cursor: diag.sdTriagem.length > 0 ? "pointer" : "default" }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "#16a085", textTransform: "uppercase", letterSpacing: .5 }}>SD sem RC</div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#16a085", textTransform: "uppercase", letterSpacing: .5 }}>Pré-compra sem RC</div>
                   <div style={{ fontSize: 32, fontWeight: 800, color: "#16a085" }}>{diag.sdTriagem.length}</div>
                   <div style={{ fontSize: 10, color: "var(--text3)" }}>Triagem fora do SLA da modalidade</div>
                 </div>
@@ -3970,17 +4088,17 @@ const topModLentas = (() => {
                   </div>
 
                   <div style={{ background: "var(--card)", borderRadius: 16, padding: "16px 18px", boxShadow: "var(--shadow)", borderTop: "4px solid #16a085" }}>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: "#16a085", marginBottom: 10 }}>Triagem SD</div>
-                    <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 10 }}>Processos ainda sem RC não entram no score executivo, mas ficam visíveis para não perder o SLA da fase SD.</div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: "#16a085", marginBottom: 10 }}>Triagem pré-compra</div>
+                    <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 10 }}>Processos ainda sem RC não entram no score executivo, mas ficam visíveis para não perder o SLA da pré-compra.</div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                      <div onClick={() => openDrill(`Diagnóstico Diretoria — SD sem RC (${scopeLabel})`, diag.sdTriagem)}
+                      <div onClick={() => openDrill(`Diagnóstico Diretoria — Pré-compra sem RC (${scopeLabel})`, diag.sdTriagem)}
                         style={{ borderRadius: 12, border: "1px solid #16a08533", background: "#16a08512", padding: "10px 12px", cursor: diag.sdTriagem.length > 0 ? "pointer" : "default" }}>
-                        <div style={{ fontSize: 10, color: "#16a085", fontWeight: 700, textTransform: "uppercase" }}>SD sem RC</div>
+                        <div style={{ fontSize: 10, color: "#16a085", fontWeight: 700, textTransform: "uppercase" }}>Pré-compra sem RC</div>
                         <div style={{ fontSize: 24, fontWeight: 800, color: "#16a085", marginTop: 4 }}>{diag.sdTriagem.length}</div>
                       </div>
-                      <div onClick={() => openDrill(`Diagnóstico Diretoria — SD acima do prazo (${scopeLabel})`, diag.sdTriagem.filter(r => r.atrasoSD))}
+                      <div onClick={() => openDrill(`Diagnóstico Diretoria — Pré-compra acima do prazo (${scopeLabel})`, diag.sdTriagem.filter(r => r.atrasoSD))}
                         style={{ borderRadius: 12, border: "1px solid #c0392b33", background: "#c0392b12", padding: "10px 12px", cursor: diag.sdTriagem.filter(r => r.atrasoSD).length > 0 ? "pointer" : "default" }}>
-                        <div style={{ fontSize: 10, color: "#c0392b", fontWeight: 700, textTransform: "uppercase" }}>SD > {PRAZO_SD} d.u.</div>
+                        <div style={{ fontSize: 10, color: "#c0392b", fontWeight: 700, textTransform: "uppercase" }}>Pré-compra > {PRAZO_SD} d.u.</div>
                         <div style={{ fontSize: 24, fontWeight: 800, color: "#c0392b", marginTop: 4 }}>{diag.sdTriagem.filter(r => r.atrasoSD).length}</div>
                       </div>
                     </div>
@@ -3999,7 +4117,7 @@ const topModLentas = (() => {
                     Abrir lista
                   </button>}
                 </div>
-                {topPressao.length === 0 ? <div style={{ fontSize: 12, color: "var(--text3)", padding: "12px 0" }}>Nenhum processo com RC em andamento para este ?mbito.</div> : (
+                {topPressao.length === 0 ? <div style={{ fontSize: 12, color: "var(--text3)", padding: "12px 0" }}>Nenhum processo com RC em andamento para este âmbito.</div> : (
                   <div style={{ overflowX: "auto" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                       <thead>
@@ -4349,7 +4467,7 @@ const topModLentas = (() => {
                             <thead>
                               <tr style={{ background: "var(--card2)", borderBottom: "2px solid var(--border2)", position: "sticky", top: 0, zIndex: 1 }}>
                                 <th style={{ padding: "10px 8px", textAlign: "left", fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase" }}>Nº RC</th>
-                                <th style={{ padding: "10px 8px", textAlign: "left", fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase" }}>Ticket SD</th>
+                                <th style={{ padding: "10px 8px", textAlign: "left", fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase" }}>Ticket pré-compra</th>
                                 <th style={{ padding: "10px 8px", textAlign: "left", fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", maxWidth: 220 }}>Objeto</th>
                                 <th style={{ padding: "10px 8px", textAlign: "left", fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase" }}>Área</th>
                                 <th style={{ padding: "10px 8px", textAlign: "left", fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase" }}>Comprador</th>
@@ -4417,7 +4535,7 @@ const topModLentas = (() => {
                   <span><span style={{ display: "inline-block", width: 12, height: 12, background: "#fdecea", border: "2px solid #e74c3c", borderRadius: 4, marginRight: 4, verticalAlign: "middle" }} /> Fora do prazo</span>
                   <span style={{ color: "var(--text3)" }}>Licitações (Pregão, Concorrência): <b>{PRAZO_LICITACAO} d.u.</b> a partir do Recebimento RC</span>
                   <span style={{ color: "var(--text3)" }}>Compras Diretas (Dispensa, Inexig., Adesão ARP, Credenc.): <b>{PRAZO_COMPRA_DIRETA} d.u.</b> a partir do Recebimento RC</span>
-                  <span style={{ color: "var(--text3)" }}>Fase SD (Abertura → Encerramento): <b>{PRAZO_SD} d.u.</b> (prazo apartado)</span>
+                  <span style={{ color: "var(--text3)" }}>Pré-compra (Abertura → Encerramento): <b>{PRAZO_SD} d.u.</b> (prazo apartado)</span>
                 </div>
               </div>
             </div>
@@ -4468,7 +4586,7 @@ const topModLentas = (() => {
                       <thead>
                         <tr style={{ background: "var(--card2)", borderBottom: "2px solid var(--border2)", position: "sticky", top: 0, zIndex: 1 }}>
                           <th style={{ padding: "10px 8px", textAlign: "left", fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase" }}>Nº RC</th>
-                          <th style={{ padding: "10px 8px", textAlign: "left", fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase" }}>Ticket SD</th>
+                          <th style={{ padding: "10px 8px", textAlign: "left", fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase" }}>Ticket pré-compra</th>
                           <th style={{ padding: "10px 8px", textAlign: "left", fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", maxWidth: 220 }}>Objeto</th>
                           <th style={{ padding: "10px 8px", textAlign: "left", fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase" }}>Área</th>
                           <th style={{ padding: "10px 8px", textAlign: "left", fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase" }}>Comprador</th>
@@ -4627,7 +4745,7 @@ const topModLentas = (() => {
                     {
                       label: "Em andamento",
                       value: overviewAdmin.emAndamento,
-                      sub: `Com RC: ${overviewAdmin.ativosComRC.length} · SD: ${overviewAdmin.sdTriagem.length}`,
+                      sub: `Com RC: ${overviewAdmin.ativosComRC.length} · Pré-compra: ${overviewAdmin.sdTriagem.length}`,
                       color: "var(--gaq-blue)",
                       rows: fBack,
                       title: "Processos em andamento",
@@ -4647,7 +4765,7 @@ const topModLentas = (() => {
                     {
                       label: "SLA Vencido",
                       value: overviewAdmin.slaVencidos.length,
-                      sub: `RC acima do SLA: ${overviewAdmin.atrasadosRC.length} · SD acima do SLA: ${overviewAdmin.sdAtrasado.length}`,
+                      sub: `RC acima do SLA: ${overviewAdmin.atrasadosRC.length} · Pré-compra acima do SLA: ${overviewAdmin.sdAtrasado.length}`,
                       color: "var(--gaq-red)",
                       rows: overviewAdmin.slaVencidos,
                       title: "Casos com SLA vencido",
@@ -4657,7 +4775,7 @@ const topModLentas = (() => {
                     {
                       label: "SLA Atendido",
                       value: overviewAdmin.slaAtendidos.length,
-                      sub: `RC dentro do SLA: ${overviewAdmin.slaAtendidosRC.length}${overviewAdmin.atencaoDentroSlaRC.length ? ` (−${overviewAdmin.atencaoDentroSlaRC.length} em atenção)` : ""} · SD no prazo: ${overviewAdmin.slaAtendidosSD.length}`,
+                      sub: `RC dentro do SLA: ${overviewAdmin.slaAtendidosRC.length}${overviewAdmin.atencaoDentroSlaRC.length ? ` (−${overviewAdmin.atencaoDentroSlaRC.length} em atenção)` : ""} · Pré-compra no prazo: ${overviewAdmin.slaAtendidosSD.length}`,
                       color: "var(--gaq-green)",
                       rows: overviewAdmin.slaAtendidos,
                       title: "Processos com SLA atendido (excl. atenção)",
@@ -5113,7 +5231,7 @@ const topModLentas = (() => {
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 18 }}>
               {[
-                { label: "Processos avaliados", value: qualityData.totalRows, color: "#1f6feb", data: fBase, title: "Qualidade — Processos avaliados" },
+                { label: "Processos avaliados", value: qualityData.totalRows, color: "#1f6feb", data: baseVis, title: "Qualidade — Processos avaliados" },
                 { label: "Com pendência", value: qualityData.totalIssues, color: "#ea580c", data: qualityData.allIssueRows, title: "Qualidade — Processos com pendência" },
                 { label: "Erros críticos", value: qualityData.criticalCount, color: "#dc2626", data: qualityData.criticalRows, title: "Qualidade — Erros críticos" },
                 { label: "Alertas de cadastro", value: qualityData.attentionCount, color: "#f59e0b", data: qualityData.attentionRows, title: "Qualidade — Alertas de cadastro" },
@@ -5407,7 +5525,7 @@ const topModLentas = (() => {
               <div className="gaq-section-h">
                 <div>
                   <div className="gaq-h3">Semáforo SLA e entrega</div>
-                  <div className="sub">SD: 10 d.u. · Negociações diretas: 30 d.u. · Licitações: 90 d.u.</div>
+                  <div className="sub">Pré-compra: 10 d.u. · Negociações diretas: 30 d.u. · Licitações: 90 d.u.</div>
                 </div>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12, marginTop: 10 }}>
@@ -5456,7 +5574,7 @@ const topModLentas = (() => {
             </div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 18, marginBottom: 16 }}>
+          {!loginArea && <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 18, marginBottom: 16 }}>
             <div className="gaq-card" style={{ padding: 22 }}>
               <div className="gaq-section-h">
                 <div>
@@ -5533,7 +5651,7 @@ const topModLentas = (() => {
                     ))}
                   </div>}
             </div>
-          </div>
+          </div>}
 
           {false && <>
 
@@ -5583,7 +5701,7 @@ const topModLentas = (() => {
                 </Recharts.BarChart>
               </Recharts.ResponsiveContainer>
               <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 8 }}>
-                Regra: início = Data da abertura do SD (fallback: DATA DO RECEBIMENTO DA RC). Fim = CPL_DATA_HOMOLOGACAO_FINAL (fallback: Data de envio do pedido/Suite; se vazio, usa hoje).
+                Regra: início = data de abertura da pré-compra (fallback: DATA DO RECEBIMENTO DA RC). Fim = CPL_DATA_HOMOLOGACAO_FINAL (fallback: Data de envio do pedido/Suite; se vazio, usa hoje).
               </div>
             </div>
           )}
@@ -5904,7 +6022,7 @@ const topModLentas = (() => {
               }
               // Insight: Processos parados em análise de SD
               const emAnaliseSD = base.filter(r => r.emA && nrm(r.statusDet || "").includes("analise service desk"));
-              if (emAnaliseSD.length > 10) insights.push({ icon: "🔍", text: `${emAnaliseSD.length} processos parados em "Análise Service Desk". Avaliar se há backlog no SD que impacta o início efetivo dos processos.`, color: "#d35400" });
+              if (emAnaliseSD.length > 10) insights.push({ icon: "🔍", text: `${emAnaliseSD.length} processos parados em "Análise Service Desk". Avaliar se há backlog na pré-compra que impacta o início efetivo dos processos.`, color: "#d35400" });
               // Insight: Processos aguardando aprovação
               const emAprov = base.filter(r => r.emA && (nrm(r.statusDet || "").includes("aprovac") || nrm(r.statusDet || "").includes("alcada")));
               if (emAprov.length > 5) insights.push({ icon: "✍️", text: `${emAprov.length} processos aguardando aprovação de alçada. Gargalo potencial no fluxo de aprovações — agilizar validação para destravar processos.`, color: "#e67e22" });
@@ -6357,13 +6475,13 @@ GAQ — Gerência de Aquisições`;
             const emAF_CPL = emAF.filter(r => r.ehCPL || pd(r[COL_CPL_RECEBIDO_NCL]) || pd(r[COL_CPL_ENVIADO_DJS_CHANCELA]) || pd(r["CPL_ABERTURA_DISPUTA_FINAL"]) || pd(r["CPL_DATA_HOMOLOGACAO_FINAL"]));
             const fasesExpandidas = [
               // ── NCL ──
-              { label: "Sem SD/RC",              area: "NCL", color: "#95a5a6", grad: "linear-gradient(90deg, #95a5a6, #bdc3c7)",
+              { label: "Sem pré-compra/RC",      area: "NCL", color: "#95a5a6", grad: "linear-gradient(90deg, #95a5a6, #bdc3c7)",
                 procs: emAF.filter(r => !r.aberturaSD && !r.aberturaRC) },
-              { label: "SD em Distribuição",      area: "NCL", color: "#2e86c1", grad: "linear-gradient(90deg, #2e86c1, #85c1e9)",
+              { label: "Pré-compra em distribuição", area: "NCL", color: "#2e86c1", grad: "linear-gradient(90deg, #2e86c1, #85c1e9)",
                 procs: emAF.filter(r => r.aberturaSD && !pd(r["Data da distribuição do SD"])) },
-              { label: "SD Distribuído",           area: "NCL", color: "#2e86c1", grad: "linear-gradient(90deg, #2e86c1, #85c1e9)",
+              { label: "Pré-compra distribuída", area: "NCL", color: "#2e86c1", grad: "linear-gradient(90deg, #2e86c1, #85c1e9)",
                 procs: emAF.filter(r => pd(r["Data da distribuição do SD"]) && !pd(r["Data do encerramento"])) },
-              { label: "SD Encerrado",             area: "NCL", color: "#2e86c1", grad: "linear-gradient(90deg, #2e86c1, #85c1e9)",
+              { label: "Pré-compra encerrada",     area: "NCL", color: "#2e86c1", grad: "linear-gradient(90deg, #2e86c1, #85c1e9)",
                 procs: emAF.filter(r => pd(r["Data do encerramento"]) && !pd(r["DATA DO RECEBIMENTO DA RC"])) },
               { label: "RC Recebida",              area: "NCL", color: "#2e86c1", grad: "linear-gradient(90deg, #2e86c1, #85c1e9)",
                 procs: emAF.filter(r => pd(r["DATA DO RECEBIMENTO DA RC"]) && !pd(r["Data inicial do envio de propostas"]) && !pd(r["Data do envio para aprovação"]) && !pd(r[COL_CPL_RECEBIDO_NCL])) },
@@ -6521,7 +6639,7 @@ GAQ — Gerência de Aquisições`;
               </div>
             </div>
 
-            {/* Fluxo Mensal — SD e RC */}
+            {/* Fluxo Mensal — pré-compra e RC */}
             {(() => {
               const MESES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
               const getYM = (d) => d ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}` : null;
@@ -6570,8 +6688,8 @@ GAQ — Gerência de Aquisições`;
               return (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
                   <div className="gaq-card" style={{ padding: 22, borderRadius: 24 }}>
-                    <div style={{ fontWeight: 700, fontSize: 15, color: "var(--gaq-text)", marginBottom: 2 }}>Fluxo mensal — SD</div>
-                    <div style={{ fontSize: 11, color: "var(--gaq-text-3)", marginBottom: 10 }}>Aberturas, cancelamentos e conclusões de SD por mês</div>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: "var(--gaq-text)", marginBottom: 2 }}>Fluxo mensal — pré-compra</div>
+                    <div style={{ fontSize: 11, color: "var(--gaq-text-3)", marginBottom: 10 }}>Aberturas, cancelamentos e conclusões de pré-compra por mês</div>
                     <Recharts.ResponsiveContainer width="100%" height={220}>
                       <Recharts.ComposedChart data={sdData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
                         <Recharts.CartesianGrid strokeDasharray="3 3" stroke="var(--gaq-line)" />
@@ -6894,7 +7012,7 @@ GAQ — Gerência de Aquisições`;
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 4 }}>
                           <span style={{ fontWeight: 600, fontSize: 13, color: "var(--gaq-text)" }}>{r.NumRC || r.TicketSD || "—"}</span>
-                          {r.TicketSD && r.NumRC && <span style={{ fontSize: 11, color: "var(--gaq-green)" }}>SD {r.TicketSD}</span>}
+                          {r.TicketSD && r.NumRC && <span style={{ fontSize: 11, color: "var(--gaq-green)" }}>Pré-compra {r.TicketSD}</span>}
                           <span style={{ fontSize: 11, color: "var(--gaq-text-3)" }}>{r.Modalidade || "—"}</span>
                           <span style={{ fontSize: 11, color: "var(--gaq-text-3)" }}>{r.respNCL || r.Pregoeiro || "—"}</span>
                         </div>
@@ -6934,7 +7052,7 @@ GAQ — Gerência de Aquisições`;
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 4 }}>
                           <span style={{ fontWeight: 600, fontSize: 13, color: "var(--gaq-text)" }}>{r.NumRC || r.TicketSD || "—"}</span>
-                          {r.TicketSD && r.NumRC && <span style={{ fontSize: 11, color: "var(--gaq-green)" }}>SD {r.TicketSD}</span>}
+                          {r.TicketSD && r.NumRC && <span style={{ fontSize: 11, color: "var(--gaq-green)" }}>Pré-compra {r.TicketSD}</span>}
                           <span style={{ fontSize: 11, color: "var(--gaq-text-3)" }}>{r.Modalidade || "—"}</span>
                           <span style={{ fontSize: 11, color: "var(--gaq-text-3)" }}>{r.respNCL || r.Pregoeiro || "—"}</span>
                         </div>
@@ -7022,32 +7140,68 @@ GAQ — Gerência de Aquisições`;
         {/* ════════════ ABA: ALERTA RC ════════════ */}
         {aba === "alertaRC" && <div>
           {renderBuscaPanel()}
-          <div style={{ background: "linear-gradient(135deg, #1a5276 0%, #2980b9 100%)", borderRadius: 12, padding: "16px 22px", marginBottom: 16, color: "#fff" }}>
-            <div style={{ fontSize: 17, fontWeight: 800 }}>📄 Alerta RC — Processos com RC em Andamento</div>
-            <div style={{ fontSize: 11, opacity: .7 }}>Processos em andamento com Nº RC preenchido · Aging contado a partir do Recebimento RC · Filtros globais aplicados</div>
-            <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
-              <div style={{ background: "rgba(255,255,255,0.15)", borderRadius: 8, padding: "8px 14px", textAlign: "center" }}>
-                <div style={{ fontSize: 22, fontWeight: 800 }}>{alertRC.length}</div>
-                <div style={{ fontSize: 9, opacity: .7 }}>total com RC</div>
+          {(() => {
+            const slaVencido = alertRC.filter(r => r.atrasoGeral).length;
+            const critRC = alertRC.filter(r => (r.diasTotaisGestao||0) > 100).length;
+            const atencRC = alertRC.filter(r => { const d = r.diasTotaisGestao||0; return d > 60 && d <= 100; }).length;
+            const parados = alertRC.filter(r => (r.diasParado||0) > 15).length;
+            const mediaRC = alertRC.length ? Math.round(alertRC.reduce((s,r)=>s+(r.diasTotaisGestao||0),0)/alertRC.length) : 0;
+            const cardKpi = (label, value, color) => (
+              <div key={label} style={{ background: "rgba(255,255,255,.10)", backdropFilter: "blur(8px)", borderRadius: 12, padding: "14px 16px", border: "1px solid rgba(255,255,255,.14)" }}>
+                <div style={{ fontSize: 10, fontWeight: 600, opacity: .78, letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 6, color: "#fff" }}>{label}</div>
+                <div style={{ fontSize: 30, fontWeight: 700, lineHeight: 1, color: color || "#fff", letterSpacing: "-.02em", fontVariantNumeric: "tabular-nums" }}>{value}</div>
               </div>
-              <div style={{ background: "rgba(255,255,255,0.15)", borderRadius: 8, padding: "8px 14px", textAlign: "center" }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: "#e74c3c" }}>{alertRC.filter(r => r.diasTotaisGestao > 100).length}</div>
-                <div style={{ fontSize: 9, opacity: .7 }}>&gt;100 d.u. (RC)</div>
+            );
+            return (
+              <div style={{ background: "linear-gradient(135deg, #0a1f3d 0%, #2980b9 100%)", color: "#fff", borderRadius: "var(--gaq-r-xl, 16px)", padding: "24px 28px", marginBottom: 18, boxShadow: "var(--gaq-shadow-2, 0 4px 16px rgba(10,31,61,.18))", border: "none" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 18 }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 600, opacity: .72, letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 4 }}>Alerta RC · Processos com RC em andamento</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-.02em" }}>Acompanhamento de RCs</div>
+                    <div style={{ fontSize: 12, opacity: .82, marginTop: 2 }}>Aging desde Recebimento RC · SLA por modalidade · Filtros globais aplicados</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {alertRC.length > 0 && (
+                      <button onClick={() => exportToExcel(alertRC, "alerta_rc.xlsx")}
+                        style={{ background: "rgba(255,255,255,.16)", color: "#fff", border: "1px solid rgba(255,255,255,.28)", borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontSize: 12, fontWeight: 600, backdropFilter: "blur(8px)" }}>
+                        Exportar Excel
+                      </button>
+                    )}
+                    {alertRC.length > 0 && (
+                      <button onClick={() => { const html = gerarRelatorioAlertaRC({ processos: alertRC, area: fArea || "Todas as Áreas", meta, fBase }); const win = window.open("", "_blank"); win.document.write(html); win.document.close(); }}
+                        style={{ background: "#fff", color: "#1a5276", border: "none", borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
+                        PDF Alerta RC
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 18 }}>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, opacity: .82, letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 10, paddingBottom: 6, borderBottom: "1px solid rgba(255,255,255,.18)" }}>
+                      Crítico — SLA Vencido / Aging Alto
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                      {cardKpi("Total RC em Andamento", alertRC.length, "#fff")}
+                      {cardKpi("SLA Vencido", slaVencido, slaVencido > 0 ? "#fecaca" : "#fff")}
+                      {cardKpi("Crítico > 100 d.u.", critRC, critRC > 0 ? "#fecaca" : "#fff")}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, opacity: .82, letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 10, paddingBottom: 6, borderBottom: "1px solid rgba(255,255,255,.18)" }}>
+                      Atenção — Monitoramento
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                      {cardKpi("Atenção 60–100 d.u.", atencRC, atencRC > 0 ? "#fed7aa" : "#fff")}
+                      {cardKpi("Parados > 15 d", parados, parados > 0 ? "#fed7aa" : "#fff")}
+                      {cardKpi("Média d.u. (RC)", mediaRC + " d.u.", mediaRC > 60 ? "#fecaca" : "#fff")}
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div style={{ background: "rgba(255,255,255,0.15)", borderRadius: 8, padding: "8px 14px", textAlign: "center" }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: "#f39c12" }}>{alertRC.filter(r => r.diasTotaisGestao > 60 && r.diasTotaisGestao <= 100).length}</div>
-                <div style={{ fontSize: 9, opacity: .7 }}>60-100 d.u. (RC)</div>
-              </div>
-            </div>
-          </div>
+            );
+          })()}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
             <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text)" }}>Processos com RC ({alertRC.length})</div>
-            <div style={{ display: "flex", gap: 6 }}>
-              {alertRC.length > 0 && <button onClick={() => exportToExcel(alertRC, "alerta_rc.xlsx")}
-                style={{ background: "#1a5276", color: "#fff", border: "none", borderRadius: 6, padding: "5px 14px", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Exportar Excel</button>}
-              {alertRC.length > 0 && <button onClick={() => { const html = gerarRelatorioAlertaRC({ processos: alertRC, area: fArea || "Todas as Áreas", meta, fBase }); const win = window.open("", "_blank"); win.document.write(html); win.document.close(); }}
-                style={{ background: "#2e86c1", color: "#fff", border: "none", borderRadius: 6, padding: "5px 14px", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>📄 PDF RC</button>}
-            </div>
           </div>
           {alertRC.length === 0 ? <div style={{ color: "var(--text3)", fontSize: 13, textAlign: "center", padding: 30 }}>Nenhum processo com RC em andamento.</div>
             : alertRC.slice((pgAlertRC-1)*pgAlertRCSz, pgAlertRC*pgAlertRCSz).map((r, i) => {
@@ -7065,7 +7219,7 @@ GAQ — Gerência de Aquisições`;
                         {watched && <span style={{ fontSize: 11, color: "#f39c12" }}>👁</span>}
                         <span style={{ fontSize: 9, color: "var(--text3)", background: "var(--card2)", borderRadius: 3, padding: "0 4px" }}>{r.ProcessKey}</span>
                         <span style={{ fontWeight: 700, color: "#2e86c1", fontSize: 12 }}>{r.NumRC}</span>
-                        {r.TicketSD && <span style={{ fontSize: 10, color: "#27ae60" }}>SD: {r.TicketSD}</span>}
+                        {r.TicketSD && <span style={{ fontSize: 10, color: "#27ae60" }}>Pré-compra: {r.TicketSD}</span>}
                         {r.atrasoGeral && <span style={{ fontSize: 9, background: "#e74c3c", color: "#fff", borderRadius: 4, padding: "1px 6px", fontWeight: 700 }}>ATRASO &gt;{r.prazoGeral} d.u.</span>}
                         {r["Área Requisitante"] && <span style={{ fontSize: 9, background: "#2e86c118", color: "#2e86c1", borderRadius: 3, padding: "0 5px", fontWeight: 600 }}>{r["Área Requisitante"]}</span>}
                         <span style={{ fontSize: 10, color: "#2e86c1" }}>{r.Modalidade || "—"}</span>
@@ -7113,101 +7267,281 @@ GAQ — Gerência de Aquisições`;
           <Pagination total={alertRC.length} page={pgAlertRC} pageSize={pgAlertRCSz} onPage={setPgAlertRC} onSize={setPgAlertRCSz} />
         </div>}
 
-        {/* ════════════ ABA: ALERTA TICKET (SD sem RC) ════════════ */}
+        {/* ════════════ ABA: IA INSIGHTS (Admin Master + Diretoria) ════════════ */}
+        {aba === "iaInsights" && (isAdminMaster || isDiretor) && <div>
+          {/* Header gradient (roxo/índigo — tema IA) */}
+          <div style={{ background: "linear-gradient(135deg, #1e1b4b 0%, #6366f1 100%)", color: "#fff", borderRadius: "var(--gaq-r-xl, 16px)", padding: "24px 28px", marginBottom: 18, boxShadow: "var(--gaq-shadow-2, 0 4px 16px rgba(30,27,75,.18))" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, opacity: .72, letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 4 }}>Inteligência Artificial · Google Gemini</div>
+                <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-.02em" }}>IA Insights</div>
+                <div style={{ fontSize: 12, opacity: .82, marginTop: 2 }}>Pergunte sobre processos, áreas, modalidades ou peça análises e recomendações com base na sua carteira.</div>
+                <div style={{ fontSize: 10, opacity: .6, marginTop: 4 }}>Modelo: gemini-2.0-flash · Contexto: {baseVis.length} processos da base acessível</div>
+              </div>
+              <div style={{ background: "rgba(255,255,255,.16)", borderRadius: 10, padding: "6px 12px", fontSize: 11, fontWeight: 700, border: "1px solid rgba(255,255,255,.28)" }}>{iaDisponivel ? "✓ IA conectada" : "✗ Chave não configurada"}</div>
+            </div>
+          </div>
+
+          {!iaDisponivel && (
+            <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 10, padding: "12px 16px", marginBottom: 14, fontSize: 12, color: "#991b1b" }}>
+              <b>IA desabilitada.</b> O arquivo <code>apikey.js</code> não foi encontrado na pasta do projeto. Solicite o arquivo a quem mantém o painel.
+            </div>
+          )}
+
+          {/* Sugestões rápidas */}
+          {iaDisponivel && iaConversa.length === 0 && (
+            <div style={{ background: "var(--card)", borderRadius: 12, padding: "16px 18px", marginBottom: 14, border: "1px solid var(--border2)", boxShadow: "var(--shadow)" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 10 }}>Sugestões para começar</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8 }}>
+                {[
+                  "Quais áreas têm mais processos com SLA vencido?",
+                  "Resuma os 5 processos mais críticos e o que está travando cada um.",
+                  "Existe concentração de risco em alguma modalidade? Por quê?",
+                  "Que recomendações você daria para reduzir o aging médio?",
+                  "Quais processos de pré-compra (SD) precisam de cobrança imediata?",
+                  "Compare a saúde da carteira por área requisitante.",
+                ].map(s => (
+                  <button key={s} onClick={() => setIaQuestion(s)}
+                    style={{ textAlign: "left", padding: "10px 14px", background: "var(--card2)", border: "1px solid var(--border2)", borderRadius: 10, cursor: "pointer", fontSize: 12, color: "var(--text)", lineHeight: 1.4 }}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Conversa */}
+          {iaConversa.length > 0 && (
+            <div style={{ background: "var(--card)", borderRadius: 12, padding: "16px 18px", marginBottom: 14, border: "1px solid var(--border2)", boxShadow: "var(--shadow)" }}>
+              {iaConversa.map((m, i) => (
+                <div key={i} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: i < iaConversa.length - 1 ? "1px solid var(--border2)" : "none" }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: m.role === "user" ? "#6366f1" : "#16a34a", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 }}>
+                    {m.role === "user" ? "Você" : "IA Gemini"}
+                  </div>
+                  <div style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{m.text}</div>
+                </div>
+              ))}
+              {iaLoading && <div style={{ fontSize: 11, color: "var(--text3)", fontStyle: "italic" }}>IA pensando…</div>}
+            </div>
+          )}
+
+          {iaError && (
+            <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "8px 12px", marginBottom: 10, fontSize: 11, color: "#991b1b" }}>{iaError}</div>
+          )}
+
+          {/* Input */}
+          {iaDisponivel && (
+            <div style={{ background: "var(--card)", borderRadius: 12, padding: "12px 14px", border: "1px solid var(--border2)", boxShadow: "var(--shadow)", display: "flex", gap: 8, alignItems: "flex-end" }}>
+              <textarea value={iaQuestion} onChange={e => setIaQuestion(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); askIA(); } }}
+                placeholder="Pergunte algo sobre os processos da base… (Ctrl+Enter para enviar)"
+                rows={3}
+                style={{ flex: 1, padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border2)", background: "var(--card2)", color: "var(--text)", fontSize: 13, resize: "vertical", fontFamily: "inherit" }} />
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <button onClick={askIA} disabled={iaLoading || !iaQuestion.trim()}
+                  style={{ background: iaLoading || !iaQuestion.trim() ? "#9ca3af" : "linear-gradient(135deg, #1e1b4b, #6366f1)", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", cursor: iaLoading || !iaQuestion.trim() ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
+                  {iaLoading ? "Enviando…" : "Enviar"}
+                </button>
+                {iaConversa.length > 0 && (
+                  <button onClick={() => { setIaConversa([]); setIaError(""); }}
+                    style={{ background: "transparent", color: "var(--text3)", border: "1px solid var(--border2)", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 11 }}>
+                    Limpar
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 10, textAlign: "center" }}>
+            ⚠ As respostas da IA são geradas a partir dos dados visíveis e podem conter erros. Sempre valide informações críticas.
+          </div>
+        </div>}
+
+        {/* ════════════ ABA: ALERTA PRÉ-COMPRA ════════════ */}
         {aba === "alertaSD" && <div>
           {renderBuscaPanel()}
-          <div style={{ background: "linear-gradient(135deg, #1e8449 0%, #27ae60 100%)", borderRadius: 12, padding: "16px 22px", marginBottom: 16, color: "#fff" }}>
-            <div style={{ fontSize: 17, fontWeight: 800 }}>🎫 Alerta SD — SD sem RC criada</div>
-            <div style={{ fontSize: 11, opacity: .7 }}>Processos em andamento com Ticket# (SD) aberto mas sem Nº RC · Aging desde abertura do SD · Filtros globais aplicados</div>
-            <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
-              <div style={{ background: "rgba(255,255,255,0.15)", borderRadius: 8, padding: "8px 14px", textAlign: "center" }}>
-                <div style={{ fontSize: 22, fontWeight: 800 }}>{alertSD.length}</div>
-                <div style={{ fontSize: 9, opacity: .7 }}>SD sem RC</div>
+
+          {/* ── Header gradient (estilo Painel Executivo) ── */}
+          {(() => {
+            const sdAtraso = alertSDAberto.filter(r => r.atrasoSD).length;
+            const sdAtenc = alertSDAberto.filter(r => (r.diasSDAberto||0) > 7 && !r.atrasoSD).length;
+            const encUrg = alertSDEncerrado.filter(r => (r.diasDesdeEncSD||0) > 7).length;
+            const encAtenc = alertSDEncerrado.filter(r => { const d = r.diasDesdeEncSD||0; return d > 3 && d <= 7; }).length;
+            const cardKpi = (label, value, color) => (
+              <div key={label} style={{ background: "rgba(255,255,255,.10)", backdropFilter: "blur(8px)", borderRadius: 12, padding: "14px 16px", border: "1px solid rgba(255,255,255,.14)" }}>
+                <div style={{ fontSize: 10, fontWeight: 600, opacity: .78, letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 6, color: "#fff" }}>{label}</div>
+                <div style={{ fontSize: 30, fontWeight: 700, lineHeight: 1, color: color || "#fff", letterSpacing: "-.02em", fontVariantNumeric: "tabular-nums" }}>{value}</div>
               </div>
-              <div style={{ background: "rgba(231,76,60,0.35)", borderRadius: 8, padding: "8px 14px", textAlign: "center", border: "1px solid rgba(231,76,60,0.5)" }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: "#fdecea" }}>{alertSD.filter(r => r.atrasoSD).length}</div>
-                <div style={{ fontSize: 9, opacity: .9 }}>&gt;{PRAZO_SD} d.u. (atraso SD)</div>
-              </div>
-              <div style={{ background: "rgba(255,255,255,0.15)", borderRadius: 8, padding: "8px 14px", textAlign: "center" }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: "#fdecea" }}>{alertSD.filter(r => r.diasSD > 30).length}</div>
-                <div style={{ fontSize: 9, opacity: .7 }}>&gt;30 d.u. SD</div>
-              </div>
-              <div style={{ background: "rgba(255,255,255,0.15)", borderRadius: 8, padding: "8px 14px", textAlign: "center" }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: "#fef9e7" }}>{alertSD.filter(r => r.diasSD > 15 && r.diasSD <= 30).length}</div>
-                <div style={{ fontSize: 9, opacity: .7 }}>15-30 d.u.</div>
-              </div>
-            </div>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text)" }}>Tickets sem RC ({alertSD.length})</div>
-            <div style={{ display: "flex", gap: 6 }}>
-              {alertSD.length > 0 && <button onClick={() => exportToExcel(alertSD, "alerta_ticket.xlsx")}
-                style={{ background: "#1e8449", color: "#fff", border: "none", borderRadius: 6, padding: "5px 14px", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Exportar Excel</button>}
-              {alertSD.length > 0 && <button onClick={() => { const html = gerarRelatorioAlertaSD({ processos: alertSD, area: fArea || "Todas as Áreas", meta, fBase }); const win = window.open("", "_blank"); win.document.write(html); win.document.close(); }}
-                style={{ background: "#27ae60", color: "#fff", border: "none", borderRadius: 6, padding: "5px 14px", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>📄 PDF SD</button>}
-            </div>
-          </div>
-          {alertSD.length === 0 ? <div style={{ color: "var(--text3)", fontSize: 13, textAlign: "center", padding: 30 }}>Nenhum ticket sem RC em andamento.</div>
-            : alertSD.slice((pgAlertSD-1)*pgAlertSDSz, pgAlertSD*pgAlertSDSz).map((r, i) => {
-              const cor = r.diasSD > 50 ? "#922b21" : r.diasSD > 30 ? "#c0392b" : r.diasSD > 15 ? "#e67e22" : "#27ae60";
-              const tags = TagsManager.getForProcess(r.ProcessKey, r.TicketSD);
-              const watched = WatchlistManager.isWatched(r.ProcessKey);
-              const rAtivoColor = r.faseSubarea === "CPL" ? "#8e44ad" : r.faseSubarea === "Scont" ? "#16a085" : "#2e86c1";
-              return (
-                <div key={r.ProcessKey + i} style={{ background: "var(--card)", borderRadius: 9, padding: "11px 14px", boxShadow: "var(--shadow)", marginBottom: 7, borderLeft: `5px solid ${cor}`, outline: watched ? "2px solid #f39c1288" : "none", cursor: "pointer" }}
-                  onClick={() => setSelProc(r)}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      {/* Linha 1: chips de identificação */}
-                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", marginBottom: 4 }}>
-                        {watched && <span style={{ fontSize: 11, color: "#f39c12" }}>👁</span>}
-                        <span style={{ fontSize: 9, color: "var(--text3)", background: "var(--card2)", borderRadius: 3, padding: "0 4px" }}>{r.ProcessKey}</span>
-                        <span style={{ fontWeight: 700, color: "#27ae60", fontSize: 12 }}>SD: {r.TicketSD}</span>
-                        <span style={{ fontSize: 10, background: "#fdecea", borderRadius: 4, padding: "0 6px", color: "#c0392b", fontWeight: 600 }}>sem RC</span>
-                        {r.atrasoSD && <span style={{ fontSize: 9, background: "#e74c3c", color: "#fff", borderRadius: 4, padding: "1px 6px", fontWeight: 700, letterSpacing: .3 }}>ATRASO SD &gt;{PRAZO_SD} d.u.</span>}
-                        {r["Área Requisitante"] && <span style={{ fontSize: 9, background: "#2e86c118", color: "#2e86c1", borderRadius: 3, padding: "0 5px", fontWeight: 600 }}>{r["Área Requisitante"]}</span>}
-                        <span style={{ fontSize: 10, color: "#2e86c1" }}>{r.Modalidade || "—"}</span>
-                        <span onClick={(e) => { e.stopPropagation(); onOpenTags(r); }} style={{ fontSize: 10, cursor: "pointer", color: "#34495e", textDecoration: "underline" }}>+tag</span>
-                        <span onClick={(e) => { e.stopPropagation(); toggleWatch(r); }} style={{ fontSize: 10, cursor: "pointer", color: watched ? "#f39c12" : "#bbb", fontWeight: watched ? 700 : 400 }}>{watched ? "★" : "☆"}</span>
-                      </div>
-                      {/* Linha 2: responsável ativo em destaque */}
-                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", marginBottom: 3 }}>
-                        <span style={{ fontWeight: 800, fontSize: 12, color: rAtivoColor }}>◉ {r.respAtivo || "—"}</span>
-                        {r.faseSubarea && <span style={{ fontSize: 9, background: `${rAtivoColor}18`, color: rAtivoColor, borderRadius: 4, padding: "1px 6px", fontWeight: 600 }}>{r.faseSubarea}</span>}
-                        {r.statusDet && <span style={{ fontSize: 9, color: "#8e44ad", background: "#8e44ad11", borderRadius: 4, padding: "1px 6px" }}>{r.statusDet}</span>}
-                        {r.faseAtual && r.faseAtual !== "—" && <span style={{ fontSize: 9, background: "#1e844915", borderRadius: 4, padding: "0 5px", color: "#1e8449" }}>{r.faseAtual}</span>}
-                      </div>
-                      {/* Linha 3: objeto */}
-                      <div style={{ fontSize: 11, color: "var(--text)", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(r.Objeto || "").slice(0, 100) || "—"}</div>
-                      {/* Linha 4: todos os responsáveis */}
-                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", fontSize: 9, color: "var(--text3)" }}>
-                        {r.Comprador && <span>Comp: <b style={{ color: "var(--text2)" }}>{r.Comprador}</b></span>}
-                        {r.Avaliador && <span>· Aval: <b style={{ color: "var(--text2)" }}>{r.Avaliador}</b></span>}
-                        {r.cplResp && <span>· CPL: <b style={{ color: "#8e44ad" }}>{r.cplResp}</b></span>}
-                        {r.Pregoeiro && r.Pregoeiro !== r.cplResp && <span>· Preg: <b style={{ color: "#8e44ad" }}>{r.Pregoeiro}</b></span>}
-                        {r.AnalistaContrato && <span>· Scont: <b style={{ color: "#16a085" }}>{r.AnalistaContrato}</b></span>}
-                        {r.AdvogadoResp && <span>· Adv: <b style={{ color: "#16a085" }}>{r.AdvogadoResp}</b></span>}
-                      </div>
-                      <div style={{ marginTop: 3 }}>{tags.map(t => <TagBadge key={t} tag={t} small />)}</div>
+            );
+            return (
+              <div style={{ background: "linear-gradient(135deg, #064e3b 0%, #059669 100%)", color: "#fff", borderRadius: "var(--gaq-r-xl, 16px)", padding: "24px 28px", marginBottom: 18, boxShadow: "var(--gaq-shadow-2, 0 4px 16px rgba(6,78,59,.18))", border: "none" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 18 }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 600, opacity: .72, letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 4 }}>Alerta Pré-compra · Tickets sem RC</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-.02em" }}>Acompanhamento Pré-compra</div>
+                    <div style={{ fontSize: 12, opacity: .82, marginTop: 2 }}>SLA pré-compra: {PRAZO_SD} d.u. · Filtros globais aplicados</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {alertSD.length > 0 && (
+                      <button onClick={() => exportToExcel(alertSD, "alerta_sd.xlsx")}
+                        style={{ background: "rgba(255,255,255,.16)", color: "#fff", border: "1px solid rgba(255,255,255,.28)", borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontSize: 12, fontWeight: 600, backdropFilter: "blur(8px)" }}>
+                        Exportar Excel
+                      </button>
+                    )}
+                    {alertSD.length > 0 && (
+                      <button onClick={() => { const html = gerarRelatorioAlertaSD({ sdAberto: alertSDAberto, sdEncerrado: alertSDEncerrado, area: fArea || "Todas as Áreas", meta, fBase }); const win = window.open("", "_blank"); win.document.write(html); win.document.close(); }}
+                        style={{ background: "#fff", color: "#065f46", border: "none", borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
+                        PDF Alerta Pré-compra
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 18 }}>
+                  {/* Bloco 1: Pré-compra em andamento */}
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, opacity: .82, letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 10, paddingBottom: 6, borderBottom: "1px solid rgba(255,255,255,.18)" }}>
+                      Pré-compra em andamento — Acompanhamento necessário GAQ
                     </div>
-                    <div style={{ textAlign: "center", minWidth: 60, flexShrink: 0 }}>
-                      <div style={{ fontSize: 22, fontWeight: 800, color: cor }}>{r.diasSD}</div>
-                      <div style={{ fontSize: 9, color: "var(--text3)" }}>d.u. SD</div>
-                      {r.diasParado > 15 && <div style={{ fontSize: 8, fontWeight: 700, color: "#e67e22", marginTop: 2 }}>últ. mov. {r.diasParado}d</div>}
-                      {r.dataEntrega && (() => {
-                        const dc = r.diasParaEntrega < 0 ? "#e74c3c" : r.diasParaEntrega <= 7 ? "#ff6b6b" : r.diasParaEntrega <= 30 ? "#fd9644" : "#27ae60";
-                        const dl = r.diasParaEntrega < 0 ? `Venc. ${Math.abs(r.diasParaEntrega)}d` : r.diasParaEntrega === 0 ? "Hoje!" : `+${r.diasParaEntrega}d`;
-                        return <div style={{ marginTop: 4, borderTop: "1px solid var(--border2)", paddingTop: 3 }}>
-                          <div style={{ fontSize: 9, fontWeight: 800, color: dc }}>📅 {dl}</div>
-                          <div style={{ fontSize: 7, color: "var(--text3)" }}>{r.dataEntrega.toLocaleDateString("pt-BR")}</div>
-                        </div>;
-                      })()}
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                      {cardKpi("Em Andamento", alertSDAberto.length, "#fff")}
+                      {cardKpi(`Atraso > ${PRAZO_SD} d.u.`, sdAtraso, sdAtraso > 0 ? "#fecaca" : "#fff")}
+                      {cardKpi(`Atenção 7–${PRAZO_SD} d.u.`, sdAtenc, sdAtenc > 0 ? "#fed7aa" : "#fff")}
+                    </div>
+                  </div>
+
+                  {/* Bloco 2: Pré-compra encerrada aguardando RC */}
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, opacity: .82, letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 10, paddingBottom: 6, borderBottom: "1px solid rgba(255,255,255,.18)" }}>
+                      Pré-compra encerrada — Aguardando RC da Área
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                      {cardKpi("Enc. sem RC", alertSDEncerrado.length, "#fff")}
+                      {cardKpi("Urgente > 7 d.u.", encUrg, encUrg > 0 ? "#fecaca" : "#fff")}
+                      {cardKpi("Atenção 3–7 d.u.", encAtenc, encAtenc > 0 ? "#fed7aa" : "#fff")}
                     </div>
                   </div>
                 </div>
-              );
-            })}
-          <Pagination total={alertSD.length} page={pgAlertSD} pageSize={pgAlertSDSz} onPage={setPgAlertSD} onSize={setPgAlertSDSz} />
+              </div>
+            );
+          })()}
+
+          {alertSD.length === 0
+            ? <div style={{ color: "var(--text3)", fontSize: 13, textAlign: "center", padding: 40, background: "var(--card)", borderRadius: 12, border: "1px solid var(--border2)" }}>
+                Nenhum ticket de pré-compra sem RC em andamento.
+              </div>
+            : <>
+              {/* ══ SEÇÃO 1: PRÉ-COMPRA EM ANDAMENTO (sem encerramento) ══ */}
+              {alertSDAberto.length > 0 && <>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                  <div style={{ width: 4, height: 20, background: "#22c55e", borderRadius: 2, flexShrink: 0 }} />
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>Pré-compra em andamento</div>
+                  <span style={{ background: "#dcfce7", color: "#15803d", borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{alertSDAberto.length}</span>
+                  <div style={{ fontSize: 11, color: "var(--text3)" }}>SLA: {PRAZO_SD} d.u. · Sem data de encerramento</div>
+                </div>
+                {alertSDAberto.slice((pgAlertSD-1)*pgAlertSDSz, pgAlertSD*pgAlertSDSz).map((r, i) => {
+                  const du_ = r.diasSDAberto || 0;
+                  const cor = du_ > PRAZO_SD ? "#dc2626" : du_ > 7 ? "#ea580c" : "#16a34a";
+                  const borderCor = du_ > PRAZO_SD ? "#fca5a5" : du_ > 7 ? "#fed7aa" : "#bbf7d0";
+                  const bgBadge = du_ > PRAZO_SD ? "#fff1f2" : du_ > 7 ? "#fff7ed" : "#f0fdf4";
+                  const tags = TagsManager.getForProcess(r.ProcessKey, r.TicketSD);
+                  const watched = WatchlistManager.isWatched(r.ProcessKey);
+                  return (
+                    <div key={r.ProcessKey + i}
+                      style={{ background: "var(--card)", borderRadius: 12, padding: "12px 16px", boxShadow: "0 1px 4px rgba(0,0,0,.06)", marginBottom: 8, border: `1px solid ${borderCor}`, borderLeft: `4px solid ${cor}`, cursor: "pointer", outline: watched ? "2px solid #f59e0b44" : "none" }}
+                      onClick={() => setSelProc(r)}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", marginBottom: 5 }}>
+                            {watched && <span style={{ fontSize: 11, color: "#f59e0b" }}>⭐</span>}
+                            <span style={{ fontWeight: 700, color: "#15803d", fontSize: 13 }}>Pré-compra {r.TicketSD}</span>
+                            <span style={{ fontSize: 10, background: "#fef2f2", borderRadius: 6, padding: "1px 7px", color: "#dc2626", fontWeight: 700 }}>sem RC</span>
+                            {r.atrasoSD && <span style={{ fontSize: 10, background: "#dc2626", color: "#fff", borderRadius: 20, padding: "2px 9px", fontWeight: 700 }}>ATRASO &gt;{PRAZO_SD} d.u.</span>}
+                            {!r.atrasoSD && du_ > 7 && <span style={{ fontSize: 10, background: "#fff7ed", color: "#c2410c", borderRadius: 20, padding: "2px 9px", fontWeight: 700, border: "1px solid #fed7aa" }}>ATENÇÃO</span>}
+                            {r["Área Requisitante"] && <span style={{ fontSize: 10, background: "#eff6ff", color: "#2563eb", borderRadius: 6, padding: "1px 7px", fontWeight: 600 }}>{r["Área Requisitante"]}</span>}
+                            {r.Modalidade && <span style={{ fontSize: 10, color: "var(--text3)" }}>{r.Modalidade}</span>}
+                            <span onClick={(e) => { e.stopPropagation(); onOpenTags(r); }} style={{ fontSize: 10, cursor: "pointer", color: "var(--text3)", textDecoration: "underline" }}>+tag</span>
+                            <span onClick={(e) => { e.stopPropagation(); toggleWatch(r); }} style={{ fontSize: 10, cursor: "pointer", color: watched ? "#f59e0b" : "var(--border2)", fontWeight: watched ? 700 : 400 }}>{watched ? "★" : "☆"}</span>
+                          </div>
+                          {r.statusDet && <div style={{ display: "inline-block", fontSize: 10, color: "#7c3aed", background: "#f5f3ff", borderRadius: 5, padding: "1px 7px", marginBottom: 4 }}>{r.statusDet}</div>}
+                          <div style={{ fontSize: 12, color: "var(--text)", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(r.Objeto || "").slice(0, 100) || "—"}</div>
+                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", fontSize: 10, color: "var(--text3)" }}>
+                            {r.Comprador && <span>Comp: <b style={{ color: "var(--text2)" }}>{r.Comprador}</b></span>}
+                            {r.Avaliador && <span>· Aval: <b style={{ color: "var(--text2)" }}>{r.Avaliador}</b></span>}
+                            {r.aberturaSD && <span>· Abertura: <b style={{ color: "var(--text2)" }}>{r.aberturaSD.toLocaleDateString("pt-BR")}</b></span>}
+                          </div>
+                          {tags.length > 0 && <div style={{ marginTop: 4 }}>{tags.map(t => <TagBadge key={t} tag={t} small />)}</div>}
+                        </div>
+                        <div style={{ textAlign: "center", minWidth: 64, flexShrink: 0, background: bgBadge, borderRadius: 10, padding: "8px 10px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                          <div style={{ fontSize: 26, fontWeight: 800, color: cor, lineHeight: 1 }}>{du_}</div>
+                          <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", marginTop: 2 }}>d.u. pré-compra</div>
+                          <div style={{ fontSize: 9, color: cor, fontWeight: 600, marginTop: 3 }}>SLA {PRAZO_SD} d.u.</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                <Pagination total={alertSDAberto.length} page={pgAlertSD} pageSize={pgAlertSDSz} onPage={setPgAlertSD} onSize={setPgAlertSDSz} />
+              </>}
+
+              {/* ══ SEÇÃO 2: PRÉ-COMPRA ENCERRADA — AGUARDANDO RC DA ÁREA ══ */}
+              {alertSDEncerrado.length > 0 && <>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: alertSDAberto.length > 0 ? 24 : 0, marginBottom: 10 }}>
+                  <div style={{ width: 4, height: 20, background: "#f59e0b", borderRadius: 2, flexShrink: 0 }} />
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>Pré-compra encerrada — Aguardando RC</div>
+                  <span style={{ background: "#fef3c7", color: "#b45309", borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{alertSDEncerrado.length}</span>
+                  <div style={{ fontSize: 11, color: "var(--text3)" }}>Responsabilidade da Área Requisitante</div>
+                </div>
+                <div style={{ background: "#fffbeb", borderRadius: 10, padding: "10px 14px", marginBottom: 14, border: "1px solid #fde68a", fontSize: 11, color: "#92400e" }}>
+                  <b>Cobrança à Área:</b> A pré-compra foi encerrada pelo GAQ. A Área Requisitante deve abrir a RC para dar continuidade ao processo de compras.
+                </div>
+                {alertSDEncerrado.slice((pgAlertSDEnc-1)*pgAlertSDEncSz, pgAlertSDEnc*pgAlertSDEncSz).map((r, i) => {
+                  const duEnc = r.diasDesdeEncSD || 0;
+                  const cor = duEnc > 7 ? "#dc2626" : duEnc > 3 ? "#ea580c" : "#b45309";
+                  const borderCor = duEnc > 7 ? "#fca5a5" : duEnc > 3 ? "#fed7aa" : "#fde68a";
+                  const bgBadge = duEnc > 7 ? "#fff1f2" : duEnc > 3 ? "#fff7ed" : "#fffbeb";
+                  const tags = TagsManager.getForProcess(r.ProcessKey, r.TicketSD);
+                  const watched = WatchlistManager.isWatched(r.ProcessKey);
+                  return (
+                    <div key={r.ProcessKey + i}
+                      style={{ background: "var(--card)", borderRadius: 12, padding: "12px 16px", boxShadow: "0 1px 4px rgba(0,0,0,.06)", marginBottom: 8, border: `1px solid ${borderCor}`, borderLeft: `4px solid ${cor}`, cursor: "pointer", outline: watched ? "2px solid #f59e0b44" : "none" }}
+                      onClick={() => setSelProc(r)}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", marginBottom: 5 }}>
+                            {watched && <span style={{ fontSize: 11, color: "#f59e0b" }}>⭐</span>}
+                            <span style={{ fontWeight: 700, color: "#b45309", fontSize: 13 }}>Pré-compra {r.TicketSD}</span>
+                            <span style={{ fontSize: 10, background: "#fef3c7", borderRadius: 6, padding: "1px 7px", color: "#b45309", fontWeight: 700 }}>pré-compra encerrada</span>
+                            <span style={{ fontSize: 10, background: "#fef2f2", borderRadius: 6, padding: "1px 7px", color: "#dc2626", fontWeight: 700 }}>sem RC</span>
+                            {duEnc > 7 && <span style={{ fontSize: 10, background: "#dc2626", color: "#fff", borderRadius: 20, padding: "2px 9px", fontWeight: 700 }}>URGENTE: {duEnc} d.u. s/ RC</span>}
+                            {r["Área Requisitante"] && <span style={{ fontSize: 10, background: "#eff6ff", color: "#2563eb", borderRadius: 6, padding: "1px 7px", fontWeight: 700 }}>{r["Área Requisitante"]}</span>}
+                            {r.Modalidade && <span style={{ fontSize: 10, color: "var(--text3)" }}>{r.Modalidade}</span>}
+                            <span onClick={(e) => { e.stopPropagation(); onOpenTags(r); }} style={{ fontSize: 10, cursor: "pointer", color: "var(--text3)", textDecoration: "underline" }}>+tag</span>
+                            <span onClick={(e) => { e.stopPropagation(); toggleWatch(r); }} style={{ fontSize: 10, cursor: "pointer", color: watched ? "#f59e0b" : "var(--border2)", fontWeight: watched ? 700 : 400 }}>{watched ? "★" : "☆"}</span>
+                          </div>
+                          {r.statusDet && <div style={{ display: "inline-block", fontSize: 10, color: "#7c3aed", background: "#f5f3ff", borderRadius: 5, padding: "1px 7px", marginBottom: 4 }}>{r.statusDet}</div>}
+                          <div style={{ fontSize: 12, color: "var(--text)", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(r.Objeto || "").slice(0, 100) || "—"}</div>
+                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", fontSize: 10, color: "var(--text3)" }}>
+                            {r["Área Requisitante"] && <span>Área: <b style={{ color: "var(--text2)" }}>{r["Área Requisitante"]}</b></span>}
+                            {r.aberturaSD && <span>· Abertura pré-compra: <b style={{ color: "var(--text2)" }}>{r.aberturaSD.toLocaleDateString("pt-BR")}</b></span>}
+                            {r.encSD && <span>· Encerramento pré-compra: <b style={{ color: "#b45309" }}>{r.encSD.toLocaleDateString("pt-BR")}</b></span>}
+                            {r.diasAgingSD > 0 && <span>· Aging pré-compra: <b style={{ color: "var(--text2)" }}>{r.diasAgingSD} d.u.</b></span>}
+                          </div>
+                          {tags.length > 0 && <div style={{ marginTop: 4 }}>{tags.map(t => <TagBadge key={t} tag={t} small />)}</div>}
+                        </div>
+                        <div style={{ textAlign: "center", minWidth: 64, flexShrink: 0, background: bgBadge, borderRadius: 10, padding: "8px 10px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                          <div style={{ fontSize: 26, fontWeight: 800, color: cor, lineHeight: 1 }}>{duEnc}</div>
+                          <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", marginTop: 2 }}>d.u. s/ RC</div>
+                          <div style={{ fontSize: 9, color: "#b45309", fontWeight: 600, marginTop: 3 }}>Pend. Área</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                <Pagination total={alertSDEncerrado.length} page={pgAlertSDEnc} pageSize={pgAlertSDEncSz} onPage={setPgAlertSDEnc} onSize={setPgAlertSDEncSz} />
+              </>}
+            </>
+          }
         </div>}
 
         {/* ════════════ ABA: MAPEAMENTO (ENRIQUECIDO) ════════════ */}
@@ -7351,7 +7685,7 @@ GAQ — Gerência de Aquisições`;
               <div key={ch.pk} style={{ background: "var(--card2)", borderRadius: 8, padding: "10px 14px", marginBottom: 8, borderLeft: "4px solid #f39c12", cursor: "pointer" }}
                 onClick={() => { setSelProc(ch.proc); setShowWatchPanel(false); }}>
                 <div style={{ fontWeight: 700, fontSize: 12, color: "#2e86c1", marginBottom: 4 }}>
-                  {ch.proc.NumRC || "—"} {ch.proc.TicketSD ? `· SD: ${ch.proc.TicketSD}` : ""}
+                  {ch.proc.NumRC || "—"} {ch.proc.TicketSD ? `· Pré-compra: ${ch.proc.TicketSD}` : ""}
                 </div>
                 <div style={{ fontSize: 11, color: "var(--text2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 6 }}>
                   {(ch.proc.Objeto || "").slice(0, 80) || "—"}
@@ -7420,7 +7754,7 @@ GAQ — Gerência de Aquisições`;
                         <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", marginBottom: 2 }}>
                           <span style={{ fontSize: 9, color: "var(--text3)", background: "var(--card2)", borderRadius: 3, padding: "0 4px" }}>{r.ProcessKey || "—"}</span>
                           <span style={{ fontWeight: 700, fontSize: 12, color: "#2e86c1" }}>{r.NumRC || "—"}</span>
-                          {r.TicketSD && <span style={{ fontSize: 10, color: "#27ae60" }}>SD: {r.TicketSD}</span>}
+                          {r.TicketSD && <span style={{ fontSize: 10, color: "#27ae60" }}>Pré-compra: {r.TicketSD}</span>}
                           <span style={{ fontSize: 10, color: "#2e86c1" }}>{r.Modalidade || "—"}</span>
                           {r.criticoNclGestao && <span style={{ fontSize: 10, color: "#c0392b", fontWeight: 700 }}>NCL crit.</span>}
                           {r.criticoCpl && <span style={{ fontSize: 10, color: "#8e44ad", fontWeight: 700 }}>CPL crit.</span>}
@@ -7508,21 +7842,21 @@ GAQ — Gerência de Aquisições`;
                       : nclByMod.map((x, i) => <RankRow key={x.name} rank={i+1} name={x.name} badge={`${x.media} d.u.`} extra={`/${x.total}`} badgeColor={x.media > 100 ? "#c0392b" : x.media > 60 ? "#e67e22" : "#1e8449"} />)}
                   </div>
                 </div>
-                {/* Aging SD — Abertura SD → Encerramento SD */}
+                {/* Aging pré-compra — Abertura → Encerramento */}
                 <div style={{ borderTop: "1px dashed #b2d4ef", paddingTop: 12, marginTop: 4 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#1a5276", marginBottom: 8 }}>🎫 Aging SD — Abertura SD → Encerramento SD (por comprador)</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#1a5276", marginBottom: 8 }}>🎫 Aging pré-compra — Abertura → Encerramento (por comprador)</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                     <div>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: "#7f8c8d", marginBottom: 6 }}>Média d.u. SD — Concluídos (SD encerrado)</div>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: "#7f8c8d", marginBottom: 6 }}>Média d.u. pré-compra — Concluídos</div>
                       {rankNCLAgingSD.length === 0 ? <div style={{ color: "var(--text3)", fontSize: 12 }}>Sem dados.</div>
                         : rankNCLAgingSD.slice(0, 8).map((x, i) => <RankRow key={x.name} rank={i+1} name={x.name} badge={`${x.media} d.u.`} extra={`/${x.total}`} badgeColor={x.media > 15 ? "#c0392b" : x.media > 8 ? "#e67e22" : "#1e8449"} onClick={() => onClickComp(x.name, "ncl")} />)}
-                      <div style={{ fontSize: 9, color: "var(--text3)", marginTop: 4 }}>Contagem: Abertura SD até Encerramento SD</div>
+                      <div style={{ fontSize: 9, color: "var(--text3)", marginTop: 4 }}>Contagem: abertura até encerramento da pré-compra</div>
                     </div>
                     <div>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: "#7f8c8d", marginBottom: 6 }}>Média d.u. SD — Andamento (SD ainda aberto)</div>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: "#7f8c8d", marginBottom: 6 }}>Média d.u. pré-compra — Em andamento</div>
                       {rankNCLAgingSDAtivo.length === 0 ? <div style={{ color: "var(--text3)", fontSize: 12 }}>Sem dados.</div>
                         : rankNCLAgingSDAtivo.slice(0, 8).map((x, i) => <RankRow key={x.name} rank={i+1} name={x.name} badge={`${x.media} d.u.`} extra={`/${x.total}`} badgeColor={x.media > 15 ? "#c0392b" : x.media > 8 ? "#e67e22" : "#1e8449"} onClick={() => onClickComp(x.name, "ncl")} />)}
-                      <div style={{ fontSize: 9, color: "var(--text3)", marginTop: 4 }}>Contagem: Abertura SD até hoje (SD não encerrado)</div>
+                      <div style={{ fontSize: 9, color: "var(--text3)", marginTop: 4 }}>Contagem: abertura da pré-compra até hoje</div>
                     </div>
                   </div>
                 </div>
@@ -7827,8 +8161,8 @@ GAQ — Gerência de Aquisições`;
 
               // Mini SLA track — versão aprimorada para gestores
               const SHORT_LBL = {
-                "Abertura SD": "Aber. SD", "Distribuição SD": "Dist. SD",
-                "Encerramento SD": "Enc. SD", "Recebimento RC": "Receb. RC",
+                "Abertura SD": "Aber. pré-compra", "Distribuição SD": "Dist. pré-compra",
+                "Encerramento SD": "Enc. pré-compra", "Recebimento RC": "Receb. RC",
                 "Planejamento RC": "Plan. RC", "Início propostas": "Prop. Iníc.",
                 "Fim propostas": "Prop. Fim", "Envio aprovação": "Env. Apr.",
                 "Última aprovação": "Últ. Apr.", "Envio Pedido/Suite": "Env. Pedido",
@@ -8012,7 +8346,7 @@ GAQ — Gerência de Aquisições`;
 
                 <div className="gaq-card" style={{ padding: "14px 20px", marginBottom: 18, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                   <input type="text" value={metroBusca} onChange={e => { setMetroBusca(e.target.value); setPgMetro(1); }}
-                    placeholder="Buscar SD, RC, Suite, Processo, Objeto..."
+                    placeholder="Buscar pré-compra, RC, Suite, Processo, Objeto..."
                     style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid var(--gaq-line)", background: "var(--gaq-surface)", color: "var(--gaq-text)", fontSize: 12, width: 260, outline: "none" }} />
                   <select value={metroComp} onChange={e => { setMetroComp(e.target.value); setPgMetro(1); }}
                     style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--gaq-line)", background: "var(--gaq-surface)", color: "var(--gaq-text)", fontSize: 12, cursor: "pointer" }}>
@@ -8175,7 +8509,7 @@ GAQ — Gerência de Aquisições`;
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6, flexWrap: "wrap" }}>
                                 <span style={{ fontWeight: 600, color: "var(--gaq-text)", fontSize: 13 }}>{r.NumRC || r.TicketSD || "—"}</span>
-                                {r.TicketSD && r.NumRC && <span style={{ fontSize: 11, color: "var(--gaq-green)" }}>SD {r.TicketSD}</span>}
+                                {r.TicketSD && r.NumRC && <span style={{ fontSize: 11, color: "var(--gaq-green)" }}>Pré-compra {r.TicketSD}</span>}
                                 <span className="gaq-meta">{r["Área Requisitante"] || "—"}</span>
                                 <span className="gaq-meta">Abertura: {dtAb}</span>
                               </div>
@@ -8327,7 +8661,7 @@ GAQ — Gerência de Aquisições`;
                           { label: "Processos " + anoBase, val: totalConc.toLocaleString("pt-BR") },
                           { label: "Lead médio (d.u.)", val: avgLeadGeral + " d.u." },
                           { label: "Mês pico", val: MESES[peakMesIdx] },
-                          { label: "SD sem RC (carryover)", val: recorrentes.length },
+                          { label: "Pré-compra sem RC (carryover)", val: recorrentes.length },
                         ].map((s, i) => (
                           <div key={i} style={{ background: "rgba(255,255,255,.12)", backdropFilter: "blur(10px)", border: "1px solid rgba(255,255,255,.14)", borderRadius: 18, padding: "16px 18px" }}>
                             <div style={{ fontSize: 9, color: "rgba(255,255,255,.55)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 4 }}>{s.label}</div>
@@ -8452,12 +8786,12 @@ GAQ — Gerência de Aquisições`;
                     </div>
                   </div>
 
-                  {/* ── CARRYOVER: SD sem RC ── */}
+                  {/* ── CARRYOVER: pré-compra sem RC ── */}
                   {recorrentes.length > 0 && (
                     <div style={{ padding: "36px 48px", background: PL.bg2, borderBottom: `1px solid ${PL.line}` }}>
                       <div style={{ marginBottom: 20 }}>
                         <div style={{ fontSize: 10, color: PL.ink3, textTransform: "uppercase", letterSpacing: 3, fontWeight: 600, marginBottom: 4 }}>Carryover · {anoAtual}</div>
-                        <div style={{ fontSize: 24, fontWeight: 800, color: PL.ink, letterSpacing: -1 }}>SD em Aberto — Demandas Pendentes</div>
+                        <div style={{ fontSize: 24, fontWeight: 800, color: PL.ink, letterSpacing: -1 }}>Pré-compra em aberto — Demandas pendentes</div>
                         <div style={{ fontSize: 12, color: PL.ink3, marginTop: 4 }}>{recorrentes.length} demandas com Service Desk aberto sem RC criada. Potencial recorrência ou pendência.</div>
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 0, borderTop: `1px solid ${PL.line}` }}>
@@ -8470,7 +8804,7 @@ GAQ — Gerência de Aquisições`;
                               onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                               <div style={{ background: diasBg, borderRadius: 16, padding: "8px 10px", textAlign: "center" }}>
                                 <div style={{ fontSize: 18, fontWeight: 900, color: diasColor, letterSpacing: -1, lineHeight: 1 }}>{r.diasSD || 0}</div>
-                                <div style={{ fontSize: 8, color: diasColor, textTransform: "uppercase", letterSpacing: 1 }}>d.u. SD</div>
+                                <div style={{ fontSize: 8, color: diasColor, textTransform: "uppercase", letterSpacing: 1 }}>d.u. pré-compra</div>
                               </div>
                               <div>
                                 <div style={{ fontSize: 11, fontWeight: 700, color: PL.ink }}>{r.TicketSD || "—"}</div>
@@ -8544,7 +8878,7 @@ GAQ — Gerência de Aquisições`;
       {/* Spotlight Search (Ctrl+K) */}
       {spotlight && <div className="spotlight-overlay" onClick={() => setSpotlight(false)}>
         <div className="spotlight-box" onClick={e => e.stopPropagation()}>
-          <input ref={spotlightRef} placeholder="Buscar RC, SD ou objeto... (Esc para fechar)"
+          <input ref={spotlightRef} placeholder="Buscar RC, pré-compra ou objeto... (Esc para fechar)"
             onChange={e => handleBuscaChange(e.target.value)} autoFocus />
           <div className="spotlight-results">
             {buscaResults.length === 0 && busca.length >= 3 && <div style={{ padding: 20, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>Nenhum resultado.</div>}
@@ -8554,7 +8888,7 @@ GAQ — Gerência de Aquisições`;
                   <div>
                     <span style={{ fontSize: 9, color: "var(--text3)", marginRight: 5 }}>{r.ProcessKey || ""}</span>
                     <span style={{ fontWeight: 700, color: "#2e86c1", fontSize: 13, marginRight: 8 }}>{r.NumRC || "—"}</span>
-                    {r.TicketSD && <span style={{ fontSize: 11, color: "#27ae60", marginRight: 8 }}>SD: {r.TicketSD}</span>}
+                    {r.TicketSD && <span style={{ fontSize: 11, color: "#27ae60", marginRight: 8 }}>Pré-compra: {r.TicketSD}</span>}
                     <span style={{ fontSize: 11, color: "var(--text2)" }}>{r.respNCL || r.Pregoeiro || "—"}</span>
                   </div>
                   <div style={{ textAlign: "right" }}>

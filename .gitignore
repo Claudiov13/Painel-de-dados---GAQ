@@ -8,6 +8,7 @@ logs/
 # Dados sensiveis e gerados localmente
 dados.js
 tags.js
+apikey.js
 **/dados.json
 **/tags.json
 

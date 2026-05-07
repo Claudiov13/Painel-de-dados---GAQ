@@ -4,13 +4,13 @@
 
 function exportToExcel(data, filename = "exportacao.xlsx") {
   const clean = data.map(r => ({
-    "ProcessKey": r.ProcessKey, "Nº RC": r.NumRC, "Ticket SD": r.TicketSD, "Comprador": r.Comprador,
+    "ProcessKey": r.ProcessKey, "Nº RC": r.NumRC, "Ticket Pré-compra": r.TicketSD, "Comprador": r.Comprador,
     "Resp. NCL": r.respNCL, "Pregoeiro": r.Pregoeiro, "Avaliador": r.Avaliador, "Analista (SCONT)": r.AnalistaContrato, "Advogado Responsável": r.AdvogadoResp, "Empresa Contratada": r.EmpresaContratada, "Modalidade": r.Modalidade,
     "Área Requisitante": r["Área Requisitante"], "Objeto": r.Objeto,
     "Status": r.status, "Status Detalhado": r.statusDet,
     "Data Abertura": r.dataAbertura ? r.dataAbertura.toLocaleDateString("pt-BR") : "",
-    "Tipo Abertura": r.aberturaSD ? "SD" : (r.aberturaRC ? "RC" : ""),
-    "Dias Úteis (desde RC)": r.diasTotais, "Dias Úteis SD (crono)": r.diasTotaisCronograma || 0, "Dias Úteis CPL": r.diasCpl,
+    "Tipo Abertura": r.aberturaSD ? "Pré-compra" : (r.aberturaRC ? "RC" : ""),
+    "Dias Úteis (desde RC)": r.diasTotais, "Dias Úteis Pré-compra (crono)": r.diasTotaisCronograma || 0, "Dias Úteis CPL": r.diasCpl,
     "Crítico NCL (>50 d.u. RC)": r.criticoNclGestao ? "Sim" : "Não",
     "Crítico CPL": r.criticoCpl ? "Sim" : "Não",
     "CPL": r.ehCPL ? "Sim" : "Não",
@@ -77,7 +77,7 @@ function gerarRelatorioHTML({ execData, fBase, rankNCL, rankGeralNCL, rankCPLRes
     return "<table style=\"width:100%;border-collapse:collapse;border:1px solid #dbe3ee\">" +
       "<thead><tr>" +
       "<th style=\"" + thS + "\">Processo</th><th style=\"" + thS + "\">Responsável</th>" +
-      "<th style=\"" + thS + "\">Área</th><th style=\"" + thS + "text-align:center\">d.u. RC</th><th style=\"" + thS + "text-align:center\">d.u. SD</th><th style=\"" + thS + "\">Objeto</th>" +
+      "<th style=\"" + thS + "\">Área</th><th style=\"" + thS + "text-align:center\">d.u. RC</th><th style=\"" + thS + "text-align:center\">d.u. pré-compra</th><th style=\"" + thS + "\">Objeto</th>" +
       "</tr></thead><tbody>" +
       list.slice(0, 15).map(r => {
         const duSD = (r.diasAgingSD > 0) ? r.diasAgingSD : (r.diasSD > 0 ? r.diasSD : "—");
@@ -211,7 +211,7 @@ function gerarRelatorioOperacional({ processos, area, meta }) {
 
   var critTable = criticos.length === 0
     ? "<p style=\"color:#888;font-size:12px;margin-bottom:16px\">Nenhum processo crítico para este filtro.</p>"
-    : table(["Processo", "Responsável", "Modalidade", "Status", "d.u. RC", "d.u. SD", "Objeto"],
+    : table(["Processo", "Responsável", "Modalidade", "Status", "d.u. RC", "d.u. pré-compra", "Objeto"],
         criticos.slice(0, 30).map(function(r) {
           var duSD=r.diasAgingSD>0?r.diasAgingSD:(r.diasSD>0?r.diasSD:"—");
           return row([
@@ -225,7 +225,7 @@ function gerarRelatorioOperacional({ processos, area, meta }) {
           ]);
         }).join(""));
 
-  var listaTable = table(["Processo", "Responsável", "Área", "Modalidade", "Status", "d.u. RC", "d.u. SD", "Objeto"],
+  var listaTable = table(["Processo", "Responsável", "Área", "Modalidade", "Status", "d.u. RC", "d.u. pré-compra", "Objeto"],
     listaEmA.slice(0, 60).map(function(r) {
       var duSD=r.diasAgingSD>0?r.diasAgingSD:(r.diasSD>0?r.diasSD:"—");
       return row([
@@ -302,10 +302,10 @@ function _pdfCommon(accentColor) {
   }
   function funil(emA,ac){
     var FASES=[
-      {label:"Sem SD/RC",fn:function(r){return !r.aberturaSD&&!r.aberturaRC;}},
-      {label:"SD em Distribuição",fn:function(r){return !!(r.aberturaSD&&!r["Data da distribuição do SD"]);}},
-      {label:"SD Distribuído",fn:function(r){var v=r["Data da distribuição do SD"];return !!(v&&v!=="")&&!r["Data do encerramento"];}},
-      {label:"SD Encerrado",fn:function(r){var v=r["Data do encerramento"];return !!(v&&v!=="")&&!(r["DATA DO RECEBIMENTO DA RC"]&&r["DATA DO RECEBIMENTO DA RC"]!=="");}},
+      {label:"Sem pré-compra/RC",fn:function(r){return !r.aberturaSD&&!r.aberturaRC;}},
+      {label:"Pré-compra em distribuição",fn:function(r){return !!(r.aberturaSD&&!r["Data da distribuição do SD"]);}},
+      {label:"Pré-compra distribuída",fn:function(r){var v=r["Data da distribuição do SD"];return !!(v&&v!=="")&&!r["Data do encerramento"];}},
+      {label:"Pré-compra encerrada",fn:function(r){var v=r["Data do encerramento"];return !!(v&&v!=="")&&!(r["DATA DO RECEBIMENTO DA RC"]&&r["DATA DO RECEBIMENTO DA RC"]!=="");}},
       {label:"RC Recebida",fn:function(r){var rc=r["DATA DO RECEBIMENTO DA RC"];return !!(rc&&rc!=="")&&!(r["Data inicial do envio de propostas"]&&r["Data inicial do envio de propostas"]!=="")&&!(r["Data do envio para aprovação"]&&r["Data do envio para aprovação"]!=="");}},
       {label:"Em Cotação",fn:function(r){var ini=r["Data inicial do envio de propostas"];return !!(ini&&ini!=="")&&!(r["Data final do envio de propostas"]&&r["Data final do envio de propostas"]!=="");}},
       {label:"Cotação Recebida",fn:function(r){var fim=r["Data final do envio de propostas"];return !!(fim&&fim!=="")&&!(r["Data do envio para aprovação"]&&r["Data do envio para aprovação"]!=="");}},
@@ -398,7 +398,7 @@ function gerarRelatorioGAQSexta({ processos, area, meta, fBase }) {
     ]);
   }).join("");
   var listaTable = listaRows
-    ? C.tbl(["#","RC","SD","Nº Processo","Comprador","Avaliador","Modalidade","Área","Objeto","Status","Status Det.","d.u. RC","d.u. SD"], listaRows)
+    ? C.tbl(["#","RC","Pré-compra","Nº Processo","Comprador","Avaliador","Modalidade","Área","Objeto","Status","Status Det.","d.u. RC","d.u. pré-compra"], listaRows)
     : "<p style=\"color:#888;font-size:12px\">Nenhum processo em andamento.</p>";
 
   var css = "*{box-sizing:border-box;margin:0;padding:0;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}" +
@@ -475,7 +475,7 @@ function gerarRelatorioGAQSextaPorAreas({ base, meta }) {
         duSD!=="—"?"<span style=\"color:"+corSD+";font-weight:700\">"+duSD+"</span>":"—"
       ]);
     }).join("");
-    var listaTable = listaRows ? C.tbl(["#","RC","SD","Nº Processo","Comprador","Avaliador","Modalidade","Objeto","Status","Status Det.","d.u. RC","d.u. SD"],listaRows)
+    var listaTable = listaRows ? C.tbl(["#","RC","Pré-compra","Nº Processo","Comprador","Avaliador","Modalidade","Objeto","Status","Status Det.","d.u. RC","d.u. pré-compra"],listaRows)
       : "<p style=\"color:#888\">Nenhum processo.</p>";
 
     return "<div class=\"area-section\">" +
@@ -527,60 +527,193 @@ function gerarRelatorioAlertaRC({ processos, area, meta, fBase }) {
   var filtroInfo = (!area || area === "TODAS" || area === "Todas as Áreas") ? "" : " · Área: <strong>" + area + "</strong>";
   var accent = "#1a5276";
   var C = _pdfCommon(accent);
+
+  // Métricas Crítico
   var total = processos.length;
-  var crit50 = processos.filter(function(r){return r.diasTotaisGestao>50;}).length;
-  var crit30 = processos.filter(function(r){return r.diasTotaisGestao>30&&r.diasTotaisGestao<=50;}).length;
+  var slaVencido = processos.filter(function(r){return r.atrasoGeral;}).length;
+  var crit100 = processos.filter(function(r){return (r.diasTotaisGestao||0)>100;}).length;
+
+  // Métricas Atenção
+  var atenc60_100 = processos.filter(function(r){var d=r.diasTotaisGestao||0;return d>60&&d<=100;}).length;
+  var parados = processos.filter(function(r){return (r.diasParado||0)>15;}).length;
   var mediaGestao = total ? Math.round(processos.reduce(function(s,r){return s+(r.diasTotaisGestao||0);},0)/total) : 0;
-  var crit100 = processos.filter(function(r){return r.diasTotaisGestao>100;}).length;
-  var semPedido = processos.filter(function(r){return r.semEnvio;}).length;
+
   var areaMap={};processos.forEach(function(r){var a=r["Área Requisitante"]||"N/I";areaMap[a]=(areaMap[a]||0)+1;});
   var areaTable=C.tbl(["Área Requisitante","Qtd"],Object.entries(areaMap).sort(function(a,b){return b[1]-a[1];}).map(function(e){return C.row([e[0],e[1]]);}).join(""));
   var modMap={};processos.forEach(function(r){var m=r.Modalidade||"N/I";modMap[m]=(modMap[m]||0)+1;});
   var modTable=C.tbl(["Modalidade","Qtd"],Object.entries(modMap).sort(function(a,b){return b[1]-a[1];}).map(function(e){return C.row([e[0],e[1]]);}).join(""));
   var sorted=processos.slice().sort(function(a,b){return (b.diasTotaisGestao||0)-(a.diasTotaisGestao||0);});
-  var listaRows=sorted.map(function(r){var dg=r.diasTotaisGestao||0;var corDu=dg>100?"#922b21":dg>50?"#c0392b":dg>30?"#e67e22":"#27ae60";var duSD=r.diasAgingSD>0?r.diasAgingSD:(r.diasSD>0?r.diasSD:"—");var corSD=(r.diasAgingSD||r.diasSD)>50?"#c0392b":(r.diasAgingSD||r.diasSD)>20?"#e67e22":"#555";return C.row([r.NumRC||"—",r.TicketSD?"SD: "+r.TicketSD:"—",r.respNCL||r.Pregoeiro||"—",r["Área Requisitante"]||"—",r.Modalidade||"—",r.statusDet||r.status||"—",r.faseAtual||"—","<span style=\"color:"+corDu+";font-weight:700\">"+dg+"</span>",duSD!=="—"?"<span style=\"color:"+corSD+";font-weight:700\">"+duSD+"</span>":"—",r.NumProcesso||"—",(r.Objeto||"—").slice(0,500)+((r.Objeto||"").length>500?"…":"")]);}).join("");
-  var css="*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Segoe UI',sans-serif;background:#eef3f8;color:#1f2937;padding:20px}@media print{body{background:#fff;padding:8px}}";
+  var listaRows=sorted.map(function(r){var dg=r.diasTotaisGestao||0;var corDu=dg>100?"#922b21":dg>50?"#c0392b":dg>30?"#e67e22":"#27ae60";var duSD=r.diasAgingSD>0?r.diasAgingSD:(r.diasSD>0?r.diasSD:"—");var corSD=(r.diasAgingSD||r.diasSD)>50?"#c0392b":(r.diasAgingSD||r.diasSD)>20?"#e67e22":"#555";return C.row([r.NumRC||"—",r.TicketSD?"Pré-compra: "+r.TicketSD:"—",r.respNCL||r.Pregoeiro||"—",r["Área Requisitante"]||"—",r.Modalidade||"—",r.statusDet||r.status||"—",r.faseAtual||"—","<span style=\"color:"+corDu+";font-weight:700\">"+dg+"</span>",duSD!=="—"?"<span style=\"color:"+corSD+";font-weight:700\">"+duSD+"</span>":"—",r.NumProcesso||"—",(r.Objeto||"—").slice(0,500)+((r.Objeto||"").length>500?"…":"")]);}).join("");
+
+  // KPI translúcido (glass) sobre o gradient
+  function gKpi(label, value, valColor) {
+    return "<div style=\"background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.18);border-radius:12px;padding:14px 16px;-webkit-print-color-adjust:exact;print-color-adjust:exact\">"+
+      "<div style=\"font-size:10px;font-weight:600;opacity:.78;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px;color:#fff\">"+label+"</div>"+
+      "<div style=\"font-size:30px;font-weight:700;line-height:1;color:"+(valColor||"#fff")+";letter-spacing:-.02em;font-variant-numeric:tabular-nums\">"+value+"</div>"+
+      "</div>";
+  }
+
+  var css="*{box-sizing:border-box;margin:0;padding:0}"+
+    "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f7;color:#1d1d1f;padding:20px}"+
+    "@media print{body{background:#fff;padding:8px}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}}";
+
   return "<!DOCTYPE html><html lang=\"pt-BR\"><head><meta charset=\"UTF-8\"><title>Alerta RC — "+titulo+"</title><style>"+css+"</style></head><body>"+
-    "<div style=\"background:linear-gradient(135deg,#1a5276,#2980b9);color:#fff;border-radius:10px;padding:18px 24px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px\"><div><div style=\"font-size:18px;font-weight:800\">📄 Sesc — Alerta RC em Andamento</div><div style=\"font-size:12px;font-weight:700;margin-top:3px;opacity:.9\">Área: "+titulo+filtroInfo+"</div><div style=\"font-size:10px;opacity:.6;margin-top:2px\">"+hoje+" às "+hora+" · Aging contado a partir do Recebimento RC · Base: "+nomeBase+"</div></div><div style=\"font-size:10px;opacity:.6;text-align:right\">GAQ — Gerência de Aquisições - DN</div></div>"+
-    C.h2("Indicadores (Aging desde Recebimento RC)")+"<div style=\"display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px\">"+C.kpi("RC em Andamento",total,accent)+C.kpi("Média d.u. (RC)",mediaGestao+" d.u.",mediaGestao>50?"#c0392b":"#2e86c1")+C.kpi(">50 d.u. (RC)",crit50,crit50>5?"#c0392b":"#e67e22")+C.kpi("30-50 d.u.",crit30,crit30>5?"#e67e22":"#27ae60")+C.kpi(">100 d.u.",crit100,crit100>0?"#c0392b":"#27ae60")+C.kpi("Sem Pedido",semPedido,semPedido>5?"#e67e22":"#27ae60")+"</div>"+
+    // ═════════ Header gradient (mesmo padrão da tela) ═════════
+    "<div style=\"background:linear-gradient(135deg,#0a1f3d 0%,#2980b9 100%);color:#fff;border-radius:16px;padding:24px 28px;margin-bottom:18px;box-shadow:0 4px 16px rgba(10,31,61,.18);-webkit-print-color-adjust:exact;print-color-adjust:exact\">"+
+      "<div style=\"display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:18px\">"+
+        "<div>"+
+          "<div style=\"font-size:11px;font-weight:600;opacity:.72;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px\">Alerta RC · Processos com RC em andamento</div>"+
+          "<div style=\"font-size:22px;font-weight:700;letter-spacing:-.02em\">Acompanhamento de RCs</div>"+
+          "<div style=\"font-size:12px;opacity:.82;margin-top:2px\">"+titulo+filtroInfo+" · Aging desde Recebimento RC · SLA por modalidade</div>"+
+          "<div style=\"font-size:10px;opacity:.6;margin-top:2px\">"+hoje+" às "+hora+" · Base: "+nomeBase+"</div>"+
+        "</div>"+
+        "<div style=\"font-size:10px;opacity:.7;text-align:right\">GAQ — Gerência de Aquisições · DN</div>"+
+      "</div>"+
+      "<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:18px\">"+
+        "<div>"+
+          "<div style=\"font-size:10px;font-weight:700;opacity:.82;letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.18)\">Crítico — SLA Vencido / Aging Alto</div>"+
+          "<div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:10px\">"+
+            gKpi("Total RC em Andamento",total,"#fff")+
+            gKpi("SLA Vencido",slaVencido,slaVencido>0?"#fecaca":"#fff")+
+            gKpi("Crítico > 100 d.u.",crit100,crit100>0?"#fecaca":"#fff")+
+          "</div>"+
+        "</div>"+
+        "<div>"+
+          "<div style=\"font-size:10px;font-weight:700;opacity:.82;letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.18)\">Atenção — Monitoramento</div>"+
+          "<div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:10px\">"+
+            gKpi("Atenção 60–100 d.u.",atenc60_100,atenc60_100>0?"#fed7aa":"#fff")+
+            gKpi("Parados > 15 d",parados,parados>0?"#fed7aa":"#fff")+
+            gKpi("Média d.u. (RC)",mediaGestao+" d.u.",mediaGestao>60?"#fecaca":"#fff")+
+          "</div>"+
+        "</div>"+
+      "</div>"+
+    "</div>"+
+
     C.sazon(fBase,accent)+C.funil(processos,accent)+
-    C.h2("📋 Status Detalhado")+C.statusDetSection(processos,total)+
-    "<div style=\"display:flex;gap:16px;flex-wrap:wrap;margin-bottom:4px\"><div style=\"flex:1;min-width:200px\">"+C.h2("📂 Por Área")+areaTable+"</div><div style=\"flex:1;min-width:200px\">"+C.h2("🏷 Por Modalidade")+modTable+"</div></div>"+
-    C.h2("📋 Lista Completa RC em Andamento ("+total+") — d.u. desde Recebimento RC")+C.tbl(["RC","SD","Responsável","Área","Modalidade","Status","Fase","d.u. RC","d.u. SD","Nº Processo","Objeto"],listaRows)+
+    C.h2("Status Detalhado")+C.statusDetSection(processos,total)+
+    "<div style=\"display:flex;gap:16px;flex-wrap:wrap;margin-bottom:4px\"><div style=\"flex:1;min-width:200px\">"+C.h2("Por Área")+areaTable+"</div><div style=\"flex:1;min-width:200px\">"+C.h2("Por Modalidade")+modTable+"</div></div>"+
+    C.h2("Lista Completa RC em Andamento ("+total+") — d.u. desde Recebimento RC")+C.tbl(["RC","Pré-compra","Responsável","Área","Modalidade","Status","Fase","d.u. RC","d.u. pré-compra","Nº Processo","Objeto"],listaRows)+
     "<div style=\"text-align:center;font-size:10px;color:#aaa;margin-top:20px;border-top:1px solid #e0e7ef;padding-top:10px\">Gerado pelo Painel GAQ · "+new Date().toLocaleString("pt-BR")+"</div>"+
     "<script>setTimeout(function(){ window.print(); }, 400);<\/script></body></html>";
 }
 
-function gerarRelatorioAlertaSD({ processos, area, meta, fBase }) {
+function gerarRelatorioAlertaSD({ sdAberto, sdEncerrado, area, meta, fBase }) {
+  sdAberto = sdAberto || [];
+  sdEncerrado = sdEncerrado || [];
   var hoje = new Date().toLocaleDateString("pt-BR", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   var hora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
   var nomeBase = meta ? meta.nomeArq : "—";
   var titulo = (!area || area === "TODAS" || area === "Todas as Áreas") ? "Todas as Áreas" : area;
   var filtroInfo = (!area || area === "TODAS" || area === "Todas as Áreas") ? "" : " · Área: <strong>" + area + "</strong>";
+  var prazoSD = typeof PRAZO_SD !== "undefined" ? PRAZO_SD : 10;
   var accent = "#1e8449";
   var C = _pdfCommon(accent);
-  var total = processos.length;
-  var processosComAberturaSD = processos.filter(function(r){ return !!r.aberturaSD; });
-  var crit30 = processos.filter(function(r){return r.diasSD>30;}).length;
-  var med15 = processos.filter(function(r){return r.diasSD>15&&r.diasSD<=30;}).length;
-  var mediaSD = processosComAberturaSD.length ? Math.round(processosComAberturaSD.reduce(function(s,r){return s+r.diasSD;},0)/processosComAberturaSD.length) : 0;
-  var crit50 = processos.filter(function(r){return r.diasSD>50;}).length;
-  var parados = processos.filter(function(r){return r.diasParado>15;}).length;
-  var areaMap={};processos.forEach(function(r){var a=r["Área Requisitante"]||"N/I";areaMap[a]=(areaMap[a]||0)+1;});
-  var areaTable=C.tbl(["Área Requisitante","Qtd"],Object.entries(areaMap).sort(function(a,b){return b[1]-a[1];}).map(function(e){return C.row([e[0],e[1]]);}).join(""));
-  var compMap={};processos.forEach(function(r){var c=r.respNCL||"N/I";compMap[c]=(compMap[c]||0)+1;});
-  var compTable=C.tbl(["Responsável","Qtd"],Object.entries(compMap).sort(function(a,b){return b[1]-a[1];}).map(function(e){return C.row([e[0],e[1]]);}).join(""));
-  var sorted=processos.slice().sort(function(a,b){return b.diasSD-a.diasSD;});
-  var listaRows=sorted.map(function(r){var corDu=r.diasSD>50?"#922b21":r.diasSD>30?"#c0392b":r.diasSD>15?"#e67e22":"#27ae60";return C.row([r.TicketSD||"—",r.respNCL||"—",r["Área Requisitante"]||"—",r.Modalidade||"—",r.statusDet||r.status||"—",r.faseAtual||"—","<span style=\"color:"+corDu+";font-weight:700\">"+r.diasSD+"</span>",r.aberturaSD?r.aberturaSD.toLocaleDateString("pt-BR"):"—",(r.Objeto||"—").slice(0,500)+((r.Objeto||"").length>500?"…":"")]);}).join("");
-  var css="*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Segoe UI',sans-serif;background:#eef3f8;color:#1f2937;padding:20px}@media print{body{background:#fff;padding:8px}}";
-  return "<!DOCTYPE html><html lang=\"pt-BR\"><head><meta charset=\"UTF-8\"><title>Alerta SD — "+titulo+"</title><style>"+css+"</style></head><body>"+
-    "<div style=\"background:linear-gradient(135deg,#1e8449,#27ae60);color:#fff;border-radius:10px;padding:18px 24px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px\"><div><div style=\"font-size:18px;font-weight:800\">🎫 Sesc — Alerta SD sem RC</div><div style=\"font-size:12px;font-weight:700;margin-top:3px;opacity:.9\">Área: "+titulo+filtroInfo+"</div><div style=\"font-size:10px;opacity:.6;margin-top:2px\">"+hoje+" às "+hora+" · Base: "+nomeBase+"</div></div><div style=\"font-size:10px;opacity:.6;text-align:right\">GAQ — Gerência de Aquisições - DN</div></div>"+
-    C.h2("Indicadores")+"<div style=\"display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px\">"+C.kpi("SD sem RC",total,accent)+C.kpi("Média d.u. SD",mediaSD+" d.u.",mediaSD>30?"#c0392b":"#2e86c1")+C.kpi(">30 d.u. SD",crit30,crit30>5?"#c0392b":"#e67e22")+C.kpi("15-30 d.u.",med15,med15>5?"#e67e22":"#27ae60")+C.kpi(">50 d.u.",crit50,crit50>0?"#c0392b":"#27ae60")+C.kpi("Parados >15d",parados,parados>3?"#e67e22":"#27ae60")+"</div>"+
-    C.sazon(fBase,accent)+C.funil(processos,accent)+
-    C.h2("📋 Status Detalhado")+C.statusDetSection(processos,total)+
-    "<div style=\"display:flex;gap:16px;flex-wrap:wrap;margin-bottom:4px\"><div style=\"flex:1;min-width:200px\">"+C.h2("📂 Por Área")+areaTable+"</div><div style=\"flex:1;min-width:200px\">"+C.h2("👤 Por Responsável")+compTable+"</div></div>"+
-    C.h2("🎫 Lista Completa SD sem RC ("+total+")")+C.tbl(["SD","Responsável","Área","Modalidade","Status","Fase","d.u. SD","Abertura SD","Objeto"],listaRows)+
-    "<div style=\"text-align:center;font-size:10px;color:#aaa;margin-top:20px;border-top:1px solid #e0e7ef;padding-top:10px\">Gerado pelo Painel GAQ · "+new Date().toLocaleString("pt-BR")+"</div>"+
+
+  // ── Métricas SD em Andamento (SLA 10 d.u.) ──
+  var totalAb = sdAberto.length;
+  var critAb = sdAberto.filter(function(r){ return (r.diasSDAberto||0) > prazoSD; }).length;
+  var atencAb = sdAberto.filter(function(r){ var d=r.diasSDAberto||0; return d > 7 && d <= prazoSD; }).length;
+  var mediaAb = totalAb ? Math.round(sdAberto.reduce(function(s,r){ return s+(r.diasSDAberto||0); },0)/totalAb) : 0;
+  var areaMapAb={};sdAberto.forEach(function(r){var a=r["Área Requisitante"]||"N/I";areaMapAb[a]=(areaMapAb[a]||0)+1;});
+  var compMapAb={};sdAberto.forEach(function(r){var c=r.respNCL||r.Comprador||"N/I";compMapAb[c]=(compMapAb[c]||0)+1;});
+
+  // ── Métricas SD Encerrado (aguardando RC pela área) ──
+  var totalEnc = sdEncerrado.length;
+  var urgEnc = sdEncerrado.filter(function(r){ return (r.diasDesdeEncSD||0) > 7; }).length;
+  var mediaEnc = totalEnc ? Math.round(sdEncerrado.reduce(function(s,r){ return s+(r.diasDesdeEncSD||0); },0)/totalEnc) : 0;
+  var areaMapEnc={};sdEncerrado.forEach(function(r){var a=r["Área Requisitante"]||"N/I";areaMapEnc[a]=(areaMapEnc[a]||0)+1;});
+
+  // ── Tabelas ──
+  var areaTableAb = C.tbl(["Área Requisitante","Qtd"],Object.entries(areaMapAb).sort(function(a,b){return b[1]-a[1];}).map(function(e){return C.row([e[0],e[1]]);}).join(""));
+  var compTableAb = C.tbl(["Responsável","Qtd"],Object.entries(compMapAb).sort(function(a,b){return b[1]-a[1];}).map(function(e){return C.row([e[0],e[1]]);}).join(""));
+  var areaTableEnc = C.tbl(["Área Requisitante","Qtd"],Object.entries(areaMapEnc).sort(function(a,b){return b[1]-a[1];}).map(function(e){return C.row([e[0],e[1]]);}).join(""));
+
+  // ── Lista SD em Andamento ──
+  var listaAbRows = sdAberto.slice().sort(function(a,b){return (b.diasSDAberto||0)-(a.diasSDAberto||0);}).map(function(r){
+    var d=r.diasSDAberto||0;
+    var cor=d>prazoSD?"#c0392b":d>7?"#e67e22":"#27ae60";
+    return C.row([r.TicketSD||"—",r.respNCL||r.Comprador||"—",r["Área Requisitante"]||"—",r.Modalidade||"—",r.statusDet||r.status||"—",
+      "<span style=\"color:"+cor+";font-weight:700\">"+d+"</span>",
+      r.aberturaSD?r.aberturaSD.toLocaleDateString("pt-BR"):"—",
+      (r.Objeto||"—").slice(0,400)+((r.Objeto||"").length>400?"…":"")]);
+  }).join("");
+
+
+  // KPI translúcido (glass) sobre o gradient
+  function gKpi(label, value, valColor) {
+    return "<div style=\"background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.18);border-radius:12px;padding:14px 16px;-webkit-print-color-adjust:exact;print-color-adjust:exact\">"+
+      "<div style=\"font-size:10px;font-weight:600;opacity:.78;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px;color:#fff\">"+label+"</div>"+
+      "<div style=\"font-size:30px;font-weight:700;line-height:1;color:"+(valColor||"#fff")+";letter-spacing:-.02em;font-variant-numeric:tabular-nums\">"+value+"</div>"+
+      "</div>";
+  }
+
+  var css="*{box-sizing:border-box;margin:0;padding:0}"+
+    "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f7;color:#1d1d1f;padding:20px}"+
+    "@media print{body{background:#fff;padding:8px}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}}"+
+    ".section-header{display:flex;align-items:center;gap:8px;margin:20px 0 10px}"+
+    ".section-bar{width:4px;border-radius:2px;height:18px;flex-shrink:0}"+
+    ".section-title{font-size:14px;font-weight:700}"+
+    ".section-badge{border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700}"+
+    ".notice{border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:11px}";
+
+  return "<!DOCTYPE html><html lang=\"pt-BR\"><head><meta charset=\"UTF-8\"><title>Alerta Pré-compra — "+titulo+"</title><style>"+css+"</style></head><body>"+
+    // ═════════ Header gradient (mesmo padrão da tela) ═════════
+    "<div style=\"background:linear-gradient(135deg,#064e3b 0%,#059669 100%);color:#fff;border-radius:16px;padding:24px 28px;margin-bottom:18px;box-shadow:0 4px 16px rgba(6,78,59,.18);-webkit-print-color-adjust:exact;print-color-adjust:exact\">"+
+      // Topo: título + meta
+      "<div style=\"display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:18px\">"+
+        "<div>"+
+          "<div style=\"font-size:11px;font-weight:600;opacity:.72;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px\">Alerta Pré-compra · Tickets sem RC</div>"+
+          "<div style=\"font-size:22px;font-weight:700;letter-spacing:-.02em\">Acompanhamento Pré-compra</div>"+
+          "<div style=\"font-size:12px;opacity:.82;margin-top:2px\">"+titulo+filtroInfo+" · SLA pré-compra: "+prazoSD+" d.u.</div>"+
+          "<div style=\"font-size:10px;opacity:.6;margin-top:2px\">"+hoje+" às "+hora+" · Base: "+nomeBase+"</div>"+
+        "</div>"+
+        "<div style=\"font-size:10px;opacity:.7;text-align:right\">GAQ — Gerência de Aquisições · DN</div>"+
+      "</div>"+
+      // Grid 2 colunas (Andamento | Encerrado)
+      "<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:18px\">"+
+        // Bloco 1: Pré-compra em andamento
+        "<div>"+
+          "<div style=\"font-size:10px;font-weight:700;opacity:.82;letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.18)\">Pré-compra em andamento — Acompanhamento necessário GAQ</div>"+
+          "<div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:10px\">"+
+            gKpi("Em Andamento",totalAb,"#fff")+
+            gKpi("Atraso > "+prazoSD+" d.u.",critAb,critAb>0?"#fecaca":"#fff")+
+            gKpi("Atenção 7–"+prazoSD+" d.u.",atencAb,atencAb>0?"#fed7aa":"#fff")+
+          "</div>"+
+          "<div style=\"display:grid;grid-template-columns:1fr;gap:10px;margin-top:10px\">"+
+            gKpi("Média d.u. (andamento)",mediaAb+" d.u.",mediaAb>prazoSD?"#fecaca":"#fff")+
+          "</div>"+
+        "</div>"+
+        // Bloco 2: Pré-compra encerrada aguardando RC
+        "<div>"+
+          "<div style=\"font-size:10px;font-weight:700;opacity:.82;letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.18)\">Pré-compra encerrada — Aguardando RC da Área</div>"+
+          "<div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:10px\">"+
+            gKpi("Enc. sem RC",totalEnc,"#fff")+
+            gKpi("Urgente > 7 d.u.",urgEnc,urgEnc>0?"#fecaca":"#fff")+
+            gKpi("Média d.u. s/ RC",mediaEnc+" d.u.",mediaEnc>7?"#fecaca":"#fff")+
+          "</div>"+
+        "</div>"+
+      "</div>"+
+    "</div>"+
+
+    // ═════════ SEÇÃO 1: PRÉ-COMPRA EM ANDAMENTO ═════════
+    (totalAb > 0 ? (
+      "<div class=\"section-header\"><div class=\"section-bar\" style=\"background:#22c55e\"></div><div class=\"section-title\">Pré-compra em andamento</div><span class=\"section-badge\" style=\"background:#dcfce7;color:#15803d\">"+totalAb+"</span><span style=\"font-size:11px;color:#6b7280\">SLA: "+prazoSD+" d.u. · Comprador responsável pelo encerramento</span></div>"+
+      "<div style=\"display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px\">"+
+        "<div style=\"flex:1;min-width:200px\">"+C.h2("Por Área")+areaTableAb+"</div>"+
+        "<div style=\"flex:1;min-width:200px\">"+C.h2("Por Responsável")+compTableAb+"</div>"+
+      "</div>"+
+      C.h2("Lista pré-compra em andamento ("+totalAb+")")+
+      C.tbl(["Pré-compra","Responsável","Área","Modalidade","Status","d.u. pré-compra","Abertura pré-compra","Objeto"],listaAbRows)
+    ) : "")+
+
+    // ═════════ SEÇÃO 2: PRÉ-COMPRA ENCERRADA AGUARDANDO RC ═════════
+    (totalEnc > 0 ? (
+      "<div class=\"section-header\" style=\"margin-top:28px\"><div class=\"section-bar\" style=\"background:#f59e0b\"></div><div class=\"section-title\">Pré-compra encerrada — Aguardando RC</div><span class=\"section-badge\" style=\"background:#fef3c7;color:#b45309\">"+totalEnc+"</span><span style=\"font-size:11px;color:#6b7280\">Responsabilidade da Área Requisitante</span></div>"+
+      "<div class=\"notice\" style=\"background:#fffbeb;border:1px solid #fde68a;color:#92400e\"><b>Cobrança à Área:</b> A pré-compra foi encerrada pelo GAQ. A Área Requisitante deve abrir a RC para dar continuidade ao processo.</div>"+
+      "<div style=\"min-width:200px;margin-bottom:8px\">"+C.h2("Por Área (pré-compra encerrada)")+areaTableEnc+"</div>"
+    ) : "")+
+
+    "<div style=\"text-align:center;font-size:10px;color:#aaa;margin-top:24px;border-top:1px solid #e0e7ef;padding-top:10px\">Gerado pelo Painel GAQ · "+new Date().toLocaleString("pt-BR")+"</div>"+
     "<script>setTimeout(function(){ window.print(); }, 400);<\/script></body></html>";
 }
 
@@ -701,7 +834,7 @@ function exportCronogramaExcel(proc, phaseIntervals) {
   const wb = window.XLSX.utils.book_new();
   const info = [
     ["Campo","Valor"],
-    ["No RC", proc.NumRC||"—"], ["Ticket SD", proc.TicketSD||"—"],
+    ["No RC", proc.NumRC||"—"], ["Ticket pré-compra", proc.TicketSD||"—"],
     ["Modalidade", proc.Modalidade||"—"],
     ["Area Requisitante", proc["Área Requisitante"]||proc.AreaReq||"—"],
     ["Objeto", proc.Objeto||"—"], ["Status", proc.status||"—"],
@@ -709,7 +842,7 @@ function exportCronogramaExcel(proc, phaseIntervals) {
     ["Comprador NCL", proc.Comprador||"—"], ["Avaliador", proc.Avaliador||"—"],
     ["Resp CPL", proc.cplResp||"—"], ["Pregoeiro", proc.Pregoeiro||"—"],
     ["Analista SCONT", proc.AnalistaContrato||"—"],
-    ["Prazo Fase SD (apartado)", PRAZO_SD+" d.u."],
+    ["Prazo pré-compra (apartado)", PRAZO_SD+" d.u."],
     ["SLA Meta Total (a partir RC)", cron.metaTotal+" d.u."],
     ["SLA baseado em historico", cron.dynamicSLA ? "Sim" : "Nao (fallback)"],
     ["Gerado em", new Date().toLocaleDateString("pt-BR")],
@@ -738,7 +871,7 @@ function exportCronogramaPDF(proc, phaseIntervals) {
       sep = "<tr><td colspan='9' style='background:#1a5276;color:#fff;text-align:center;font-weight:700;padding:6px;font-size:11px'>SLA: "+cron.metaTotal+" d.u. a partir do Recebimento RC</td></tr>";
     }
     prevZone = r.zone;
-    const zoneBadge = r.zone === "SD" ? "<span style='background:#e67e22;color:#fff;border-radius:3px;padding:0 5px;font-size:9px;margin-left:4px'>SD</span>" : "";
+    const zoneBadge = r.zone === "SD" ? "<span style='background:#e67e22;color:#fff;border-radius:3px;padding:0 5px;font-size:9px;margin-left:4px'>Pré-compra</span>" : "";
     return sep+"<tr style='background:"+corBg(r)+"'><td style='text-align:center;color:#555'>"+r.num+"</td><td style='font-weight:600'>"+r.etapa+zoneBadge+"</td><td style='color:#555;font-size:11px'>"+r.responsavel+"</td><td style='text-align:center;color:#1a5276'>"+r.sla+"</td><td style='text-align:center'>"+r.planejada+"</td><td style='text-align:center;font-weight:"+(r._ok?700:400)+";color:"+(r._ok?"#1e8449":"#999")+"'>"+r.real+"</td><td style='text-align:center;font-size:12px'>"+r.status+"</td><td style='text-align:center;color:"+corVar(r.variacao)+";font-weight:600'>"+r.variacao+"</td></tr>";
   }).join("");
   const gerado = new Date().toLocaleDateString("pt-BR");
@@ -747,7 +880,7 @@ function exportCronogramaPDF(proc, phaseIntervals) {
     +"<div class='hdr'><div><div style='font-size:18px;font-weight:800'>Cronograma de Processo</div><div style='font-size:11px;opacity:.8'>Painel de Dados de Compras GAQ · Sesc Departamento Nacional</div></div><div style='text-align:right;font-size:11px;opacity:.8'>Gerado em "+gerado+"<br/>SLA: "+(cron.isCPL?"Pregao/Concorrencia":"Demais modalidades")+"</div></div>"
     +"<div class='info'>"
     +"<div style='display:flex;gap:8px'><span class='lbl'>No RC:</span><span>"+(proc.NumRC||"—")+"</span></div>"
-    +"<div style='display:flex;gap:8px'><span class='lbl'>Ticket SD:</span><span>"+(proc.TicketSD||"—")+"</span></div>"
+    +"<div style='display:flex;gap:8px'><span class='lbl'>Ticket pré-compra:</span><span>"+(proc.TicketSD||"—")+"</span></div>"
     +"<div style='display:flex;gap:8px'><span class='lbl'>Modalidade:</span><span><b>"+(proc.Modalidade||"—")+"</b></span></div>"
     +"<div style='display:flex;gap:8px'><span class='lbl'>Area Requisitante:</span><span>"+(proc["Área Requisitante"]||proc.AreaReq||"—")+"</span></div>"
     +"<div style='display:flex;gap:8px;grid-column:1/-1'><span class='lbl'>Objeto:</span><span>"+(proc.Objeto||"—")+"</span></div>"
@@ -756,7 +889,7 @@ function exportCronogramaPDF(proc, phaseIntervals) {
     +"<div style='display:flex;gap:8px'><span class='lbl'>Resp. CPL:</span><span>"+(proc.cplResp||"—")+"</span></div>"
     +"<div style='display:flex;gap:8px'><span class='lbl'>Analista SCONT:</span><span>"+(proc.AnalistaContrato||"—")+"</span></div>"
     +"</div>"
-    +"<div class='meta'>Fase SD: "+PRAZO_SD+" d.u. (apartado) | SLA Meta: "+cron.metaTotal+" d.u. a partir do Recebimento RC | "+(cron.isCPL?"Pregao / Concorrencia":"Demais Modalidades")+(cron.dynamicSLA?" | SLA baseado no historico":"")+"</div>"
+    +"<div class='meta'>Pré-compra: "+PRAZO_SD+" d.u. (apartado) | SLA Meta: "+cron.metaTotal+" d.u. a partir do Recebimento RC | "+(cron.isCPL?"Pregao / Concorrencia":"Demais Modalidades")+(cron.dynamicSLA?" | SLA baseado no historico":"")+"</div>"
     +"<table><thead><tr><th style='width:30px'>No</th><th>Etapa</th><th>Responsavel</th><th style='width:90px;text-align:center'>SLA Meta</th><th style='width:110px;text-align:center'>Data Planejada</th><th style='width:110px;text-align:center'>Data Real</th><th style='width:100px;text-align:center'>Status</th><th style='width:100px;text-align:center'>Variacao</th></tr></thead><tbody>"+linhas+"</tbody></table>"
     +"<div class='ftr'>Painel de Dados de Compras GAQ · Sesc Departamento Nacional · "+new Date().getFullYear()+"</div>"
     +"</body></html>";

@@ -249,6 +249,8 @@ function parseBase(rows) {
     const atrasoSD = diasSDAberto > PRAZO_SD;
     // atrasoGeral: processo com RC que já ultrapassou o prazo geral da modalidade
     const atrasoGeral = emA && abRC && diasTotais > prazoGeral;
+    // diasDesdeEncSD: d.u. desde o encerramento do SD sem RC aberta (responsabilidade da área requisitante)
+    const diasDesdeEncSD = (encSD && !abRC) ? du(encSD, hoje) : 0;
     return {
       ...r, ProcessKey, Comprador, Pregoeiro, cplResp, Avaliador, AnalistaContrato, AdvogadoResp, EmpresaContratada, respNCL, NumPedidoSuite, NumProcesso, Historico, HistoricoScont, HistoricoCPL,
       "Área Requisitante": AreaReq, Modalidade, Objeto, NumRC, TicketSD, statusDet,
@@ -259,7 +261,7 @@ function parseBase(rows) {
       faseAtual, faseSubarea, respAtivo, respFase, faseAtualIdx, diasRC, diasSD, somenteSD,
       dataEntrega, diasParaEntrega, isLegado,
       diasTotaisGestao, criticoNclGestao, encSD, diasAgingSD, diasTotaisCronograma,
-      prazoGeral, diasSDAberto, atrasoSD, atrasoGeral,
+      prazoGeral, diasSDAberto, atrasoSD, atrasoGeral, diasDesdeEncSD,
     };
   });
 }
@@ -818,10 +820,10 @@ function calcSLAClassification(proc, phaseIntervals, options) {
     bucket = "sla_vencido";
     detail = hasRC
       ? "Fora do SLA da modalidade, mas ainda dentro do cronograma de entrega."
-      : "SD acima de 10 d.u., mas ainda sem ruptura de entrega pelo cenário de 90 d.u.";
+      : "Pré-compra acima de 10 d.u., mas ainda sem ruptura de entrega pelo cenário de 90 d.u.";
   } else if (!hasRC) {
     bucket = "no_prazo";
-    detail = "SD dentro do prazo de 10 d.u.";
+    detail = "Pré-compra dentro do prazo de 10 d.u.";
   } else if (atencaoPrazo || atencaoEntrega) {
     bucket = "atencao";
     if (projecaoForaCronograma) detail = "Projeção de entrega já pressionada pelo ritmo atual.";
@@ -971,10 +973,10 @@ function calcSLAClassification(proc, phaseIntervals, options) {
     bucket = "sla_vencido";
     detail = hasRC
       ? "Fora do SLA da modalidade, mas ainda dentro do cronograma de entrega."
-      : "SD acima de 10 d.u.; entrega avaliada no pior cenario de 90 d.u.";
+      : "Pré-compra acima de 10 d.u.; entrega avaliada no pior cenario de 90 d.u.";
   } else if (!hasRC) {
     bucket = "no_prazo";
-    detail = "SD dentro do prazo de 10 d.u.";
+    detail = "Pré-compra dentro do prazo de 10 d.u.";
   } else if (atencaoPrazo || atencaoEntrega || projecaoEstouraSla) {
     bucket = "atencao";
     if (projecaoEstouraSla && atencaoEntrega) detail = `Margem curta para SLA e entrega (ate ${attentionThresholdDU} d.u.).`;
