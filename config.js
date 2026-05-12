@@ -41,6 +41,7 @@ var SCONT_TIMELINE_KEYS = new Set([
   "DATA DE ENVIO DO PEDIDO (fornecedor) OU SUITE SESC (SCONT ou CPL)",
   "DATA DE RECEBIMENTO DA DEMANDA PELA ANALISTA DE CONTRATO",
   "DATA DE RECEBIMENTO NA DJ (QUANDO APLIC\u00C1VEL)",
+  "DATA DE CONCLUSAO DE CONTRATO SCONT",
 ]);
 
 function isCplTimelineKey(key) {
@@ -58,7 +59,12 @@ function getTimelineSubareaByKey(key) {
   return "NCL";
 }
 
-var TL_COLS = [
+// Chave da nova fase final — vai começar a ser preenchida em processos de 2025+
+var COL_CONCLUSAO_CONTRATO_SCONT = "DATA DE CONCLUSAO DE CONTRATO SCONT";
+
+// ── Timeline LEGACY (ordem usada até 2024) ─────────────────────────────────
+// Mantida para processos abertos em 2024 (anoSD === 2024 ou anoRC === 2024)
+var TL_COLS_LEGACY = [
   ["Abertura SD","Data da abertura do SD"],
   ["Distribuição SD","Data da distribuição do SD"],
   ["Encerramento SD","Data do encerramento"],
@@ -80,6 +86,44 @@ var TL_COLS = [
   ["Recebimento DJ","DATA DE RECEBIMENTO NA DJ (QUANDO APLICÁVEL)"],
 ];
 
+// ── Timeline 2025+ (nova ordem) ────────────────────────────────────────────
+// "Indicação Analista de Contrato" vem logo após "CPL: Recebido do NCL".
+// "Recebimento DJ" vem logo após "CPL: Enviado p/ DJS".
+// Nova fase final "Conclusão Contrato (Scont)".
+var TL_COLS_2025 = [
+  ["Abertura SD","Data da abertura do SD"],
+  ["Distribuição SD","Data da distribuição do SD"],
+  ["Encerramento SD","Data do encerramento"],
+  ["Recebimento RC","DATA DO RECEBIMENTO DA RC"],
+  ["Planejamento RC","DATA DO PLANEJAMENTO DA RC"],
+  ["Início propostas","Data inicial do envio de propostas"],
+  ["Fim propostas","Data final do envio de propostas"],
+  ["Envio aprovação","Data do envio para aprovação"],
+  ["Última aprovação","Data da última aprovação"],
+  ["Envio Pedido/Suite","DATA DE ENVIO DO PEDIDO (fornecedor) OU SUITE SESC (SCONT ou CPL)"],
+  ["CPL: Recebido do NCL",COL_CPL_RECEBIDO_NCL],
+  ["Indicação Analista de Contrato","DATA DE RECEBIMENTO DA DEMANDA PELA ANALISTA DE CONTRATO"],
+  ["CPL: Enviado p/ DJS",COL_CPL_ENVIADO_DJS_CHANCELA],
+  ["Recebimento DJ","DATA DE RECEBIMENTO NA DJ (QUANDO APLICÁVEL)"],
+  ["CPL: Recebimento","CPL_DATA_RECEBIMENTO_FINAL"],
+  ["CPL: Publicação","CPL_PUBLICACAO_AVISO_FINAL"],
+  ["CPL: Abertura Disputa","CPL_ABERTURA_DISPUTA_FINAL"],
+  ["CPL: Fase ext.","CPL_FINALIZACAO_FASE_EXTERNA_FINAL"],
+  ["CPL: Homologação","CPL_DATA_HOMOLOGACAO_FINAL"],
+  ["Conclusão Contrato (Scont)", COL_CONCLUSAO_CONTRATO_SCONT],
+];
+
+// TL_COLS = default (usado por agregações que não têm proc específico).
+// Sempre = TL_COLS_2025 para que novas fases entrem em cálculos globais.
+var TL_COLS = TL_COLS_2025;
+
+// Retorna a ordem correta de fases para um processo específico.
+// Processos abertos em 2024 (SD ou RC) usam ordem LEGACY; demais usam 2025+.
+function getTLColsForProc(proc) {
+  if (proc && (proc.anoSD === 2024 || proc.anoRC === 2024)) return TL_COLS_LEGACY;
+  return TL_COLS_2025;
+}
+
 var PAGE_SIZES = [20, 50, 100];
 
 // Prazos gerais por tipo de modalidade (em dias úteis, a partir do Recebimento RC)
@@ -93,15 +137,19 @@ function getPrazoGeral(modNrm) {
   return PRAZO_COMPRA_DIRETA;
 }
 
-// Etapas do timeline por tipo de modalidade (índices em TL_COLS)
-// CPL (Pregão/Concorrência): todas as etapas
-// Simples (Dispensa/Inexig/Adesão/Credenciamento): sem etapas CPL (índices 10-16)
-function getTLColsForMod(modNrm) {
+// Etapas do timeline por tipo de modalidade (índices em TL_COLS do proc).
+// CPL (Pregão/Concorrência): todas as etapas.
+// Simples (Dispensa/Inexig/Adesão/Credenciamento): filtra as fases CPL pela key.
+// Aceita proc opcional para usar ordem LEGACY/2025 correta; sem proc, usa default.
+function getTLColsForMod(modNrm, proc) {
+  var cols = proc ? getTLColsForProc(proc) : TL_COLS;
   if (modNrm.includes("pregao") || modNrm.includes("concorrencia") || modNrm.includes("dialogo")) {
-    return TL_COLS.map((col, i) => i);
+    return cols.map(function (col, i) { return i; });
   }
-  // Simples: índices 0-9 + 17-18 (sem CPL)
-  return TL_COLS.map((col, i) => i).filter(i => i < 10 || i > 16);
+  // Simples: filtra fases CPL identificadas pela key (não pelo índice — índices mudam entre LEGACY e 2025).
+  return cols.map(function (col, i) { return { col: col, i: i }; })
+             .filter(function (x) { return !isCplTimelineKey(x.col[1]); })
+             .map(function (x) { return x.i; });
 }
 
 // Mapa de responsabilidade por fase (baseado no fluxo SESC GAQ)
@@ -125,6 +173,7 @@ var PHASE_RESP = {
   "CPL_DATA_HOMOLOGACAO_FINAL": "GAQ / Diretoria / Presidente",
   "DATA DE RECEBIMENTO DA DEMANDA PELA ANALISTA DE CONTRATO": "GAQ",
   "DATA DE RECEBIMENTO NA DJ (QUANDO APLICÁVEL)": "DJ",
+  "DATA DE CONCLUSAO DE CONTRATO SCONT": "Scont",
 };
 
 // ── FASE SD — PRAZO APARTADO (10 d.u. total da Abertura até Encerramento) ──

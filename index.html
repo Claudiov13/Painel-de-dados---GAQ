@@ -137,6 +137,7 @@ const Icon = ({ name, size = 18, stroke = 1.6, color = "currentColor", style = {
     case "external":  return <svg {...common}><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M19 14v5a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h5"/></svg>;
     case "menu":      return <svg {...common}><path d="M3 6h18M3 12h18M3 18h18"/></svg>;
     case "sidebar":   return <svg {...common}><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>;
+    case "key":       return <svg {...common}><circle cx="8" cy="14" r="4"/><path d="M11 11l9-9"/><path d="M16 6l3 3"/><path d="M14 8l3 3"/></svg>;
     default: return null;
   }
 };
@@ -220,16 +221,19 @@ const RankRow = ({ rank, name, badge, badgeColor, extra, onClick }) => (
 );
 
 /* ── FIX: TagBadge com delete funcional ────────────────────── */
-const TagBadge = ({ tag, onRemove, small }) => {
+const TagBadge = ({ tag, onRemove, small, onDark }) => {
   const c = TagsManager.getTagColor(tag);
+  const bg = onDark ? c : c + "22";
+  const fg = onDark ? "#fff" : c;
+  const bd = onDark ? "rgba(255,255,255,0.28)" : `${c}44`;
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 3, background: c + "22", color: c, borderRadius: 12, padding: small ? "0 6px" : "1px 8px", fontSize: small ? 9 : 10, fontWeight: 700, border: `1px solid ${c}44`, whiteSpace: "nowrap" }}>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 3, background: bg, color: fg, borderRadius: 12, padding: small ? "0 6px" : "1px 8px", fontSize: small ? 9 : 10, fontWeight: 700, border: `1px solid ${bd}`, whiteSpace: "nowrap" }}>
       {tag}
       {onRemove && (
         <span
           role="button"
           onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove(); }}
-          style={{ cursor: "pointer", marginLeft: 3, fontWeight: 900, fontSize: small ? 12 : 14, lineHeight: 1, color: c, display: "inline-flex", alignItems: "center", justifyContent: "center", width: small ? 14 : 16, height: small ? 14 : 16, borderRadius: "50%", background: c + "22" }}
+          style={{ cursor: "pointer", marginLeft: 3, fontWeight: 900, fontSize: small ? 12 : 14, lineHeight: 1, color: fg, display: "inline-flex", alignItems: "center", justifyContent: "center", width: small ? 14 : 16, height: small ? 14 : 16, borderRadius: "50%", background: onDark ? "rgba(255,255,255,0.18)" : c + "22" }}
         >×</span>
       )}
     </span>
@@ -742,10 +746,15 @@ const TimelineModal = ({ proc, onClose, onOpenTags, onUpdate, phaseIntervals, on
   const [showResponsaveis, setShowResponsaveis] = useState(false);
   const tags = TagsManager.getForProcess(proc.ProcessKey, proc.TicketSD);
   const isWatched = WatchlistManager.isWatched(proc.ProcessKey);
-  const ents = TL_COLS.map(([label, key], idx) => ({ label, key, date: pd(proc[key]), isCPL: isCplTimelineKey(key), idx }));
+  // Ordem das fases varia por proc: 2024 → LEGACY, demais → 2025+ (com nova Conclusão Scont)
+  const tlColsProc = getTLColsForProc(proc);
+  const ents = tlColsProc.map(([label, key], idx) => ({ label, key, date: pd(proc[key]), isCPL: isCplTimelineKey(key), idx }));
   const _tlSla = calcSLAClassification(proc, phaseIntervals);
   const _tlBk = _tlSla ? SLA_BUCKETS[_tlSla.bucket] : null;
-
+  const entregaDate = pd(proc.dataEntrega);
+  const entregaDU = entregaDate ? businessDaysFromTodaySigned(entregaDate) : null;
+  const entregaColor = entregaDU == null ? "#2e86c1" : entregaDU < 0 ? "#c0392b" : entregaDU <= 15 ? "#e67e22" : "#27ae60";
+  const entregaLabel = entregaDU == null ? "" : entregaDU < 0 ? `${Math.abs(entregaDU)} d.u. vencida` : entregaDU === 0 ? "vence hoje" : `${entregaDU} d.u. restantes`;
   useEffect(() => { setShowPredictions(false); }, [proc?.ProcessKey]);
 
   // ── Calcular previsões para datas não preenchidas ──
@@ -755,8 +764,8 @@ const TimelineModal = ({ proc, onClose, onOpenTags, onUpdate, phaseIntervals, on
     const modData = phaseIntervals.byMod[mod] || {};
     const globalData = phaseIntervals.global || {};
     const preds = {};
-    // Modalidades sem CPL param no Envio Pedido/Suite (idx 9)
-    const maxPredIdx = proc.isNonCPL ? IDX_ENVIO_PEDIDO : TL_COLS.length - 1;
+    // Modalidades sem CPL param no Envio Pedido/Suite (idx 9 — mesmo em LEGACY e 2025)
+    const maxPredIdx = proc.isNonCPL ? IDX_ENVIO_PEDIDO : tlColsProc.length - 1;
     // Encontrar última data preenchida até o limite da modalidade
     let lastFilledIdx = -1, lastFilledDate = null;
     ents.forEach((en, i) => { if (en.date && i <= maxPredIdx) { lastFilledIdx = i; lastFilledDate = en.date; } });
@@ -764,8 +773,8 @@ const TimelineModal = ({ proc, onClose, onOpenTags, onUpdate, phaseIntervals, on
     // Projetar para frente a partir da última data preenchida
     let cursor = lastFilledDate;
     for (let i = lastFilledIdx; i < maxPredIdx; i++) {
-      const [, keyA] = TL_COLS[i];
-      const [, keyB] = TL_COLS[i + 1];
+      const [, keyA] = tlColsProc[i];
+      const [, keyB] = tlColsProc[i + 1];
       const pair = keyA + "→" + keyB;
       const data = modData[pair] || globalData[pair];
       if (!data || !data.avg) continue;
@@ -774,7 +783,7 @@ const TimelineModal = ({ proc, onClose, onOpenTags, onUpdate, phaseIntervals, on
       // Projetar: cursor + avg dias úteis (aproximar como dias corridos * 1.4)
       const projDate = new Date(cursor);
       projDate.setDate(projDate.getDate() + Math.round(data.avg * 1.4));
-      preds[TL_COLS[i + 1][1]] = { date: projDate, avg: data.avg, n: data.n, source: modData[pair] ? "modalidade" : "global" };
+      preds[tlColsProc[i + 1][1]] = { date: projDate, avg: data.avg, n: data.n, source: modData[pair] ? "modalidade" : "global" };
       cursor = projDate;
     }
     return preds;
@@ -791,17 +800,19 @@ const TimelineModal = ({ proc, onClose, onOpenTags, onUpdate, phaseIntervals, on
   }, [predictions, proc]);
 
   return (<>
-    <div style={{ position: "fixed", inset: 0, background: "#0008", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={onClose}>
-      <div style={{ background: "var(--card)", borderRadius: 12, width: "min(700px,95vw)", maxHeight: "92vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px #0005" }} onClick={e => e.stopPropagation()}>
-        <div style={{ padding: "16px 22px", background: "#1a5276", color: "#fff", borderRadius: "12px 12px 0 0", display: "flex", justifyContent: "space-between" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={onClose}>
+      <div style={{ background: "var(--gaq-surface)", borderRadius: "var(--gaq-r-xl)", width: "min(720px,95vw)", maxHeight: "92vh", display: "flex", flexDirection: "column", boxShadow: "var(--gaq-shadow-2)", border: "1px solid var(--gaq-line)", overflow: "hidden" }} onClick={e => e.stopPropagation()}>
+        {/* ── Header com gradiente ─────────────────────────────── */}
+        <div style={{ padding: "20px 24px", background: "linear-gradient(135deg, #0a1f3d 0%, #1a3a6e 55%, #1a5276 100%)", color: "#fff", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>Timeline — {proc.NumRC || "Processo"}</div>
+            <div style={{ fontSize: 10, fontWeight: 600, opacity: .72, letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 4 }}>Timeline · Processo</div>
+            <div style={{ fontWeight: 700, fontSize: 18, letterSpacing: "-0.02em", marginBottom: 10 }}>{proc.NumRC || proc.TicketSD || "Processo"}</div>
             {/* Chips de responsáveis organizados por função */}
             {(() => {
-              const InfoChip = ({ label, value, color = "rgba(255,255,255,0.15)" }) => value ? (
-                <div style={{ display: "flex", flexDirection: "column", background: color, borderRadius: 6, padding: "3px 8px", minWidth: 0 }}>
-                  <span style={{ fontSize: 8, opacity: .7, fontWeight: 700, textTransform: "uppercase", letterSpacing: .5, whiteSpace: "nowrap" }}>{label}</span>
-                  <span style={{ fontSize: 10, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 140 }}>{value}</span>
+              const InfoChip = ({ label, value, color = "rgba(255,255,255,0.10)" }) => value ? (
+                <div style={{ display: "flex", flexDirection: "column", background: color, borderRadius: 8, padding: "4px 10px", minWidth: 0, border: "1px solid rgba(255,255,255,0.12)" }}>
+                  <span style={{ fontSize: 8, opacity: .72, fontWeight: 700, textTransform: "uppercase", letterSpacing: .5, whiteSpace: "nowrap" }}>{label}</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 150 }}>{value}</span>
                 </div>
               ) : null;
               const respFields = [
@@ -815,93 +826,106 @@ const TimelineModal = ({ proc, onClose, onOpenTags, onUpdate, phaseIntervals, on
               ].filter(Boolean);
               const hasExtra = respFields.length > 0;
               return (<>
-                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 4 }}>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
                   <InfoChip label="Modalidade" value={proc.Modalidade} />
                   <InfoChip label="Área" value={proc["Área Requisitante"]} />
                   {!showResponsaveis && respFields.slice(0, 2).map((f, i) => <InfoChip key={i} label={f.label} value={f.value} />)}
                   {hasExtra && (
                     <button onClick={() => setShowResponsaveis(s => !s)}
-                      style={{ background: showResponsaveis ? "rgba(255,255,255,0.30)" : "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.25)", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 9, fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>
+                      style={{ background: showResponsaveis ? "rgba(255,255,255,0.20)" : "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.20)", borderRadius: 8, padding: "4px 10px", cursor: "pointer", fontSize: 10, fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>
                       {showResponsaveis ? "▲ Ocultar" : "▼ Responsáveis (" + respFields.length + ")"}
                     </button>
                   )}
                 </div>
                 {showResponsaveis && (
-                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 4 }}>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
                     {respFields.map((f, i) => <InfoChip key={i} label={f.label} value={f.value} />)}
                   </div>
                 )}
               </>);
             })()}
             <div onClick={() => proc.Objeto && proc.Objeto.length > 80 && setShowObjeto(s => !s)}
-              style={{ fontSize: 10, opacity: .7, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 460, marginBottom: 4, cursor: proc.Objeto && proc.Objeto.length > 80 ? "pointer" : "default" }}>
-              {proc.Objeto ? proc.Objeto.slice(0, 80) : ""}
-              {proc.Objeto && proc.Objeto.length > 80 && <span style={{ opacity: .6, marginLeft: 4, fontSize: 9 }}>(...clique p/ ver completo)</span>}
+              style={{ fontSize: 11, opacity: .78, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 460, marginBottom: 6, marginTop: 4, lineHeight: 1.5, cursor: proc.Objeto && proc.Objeto.length > 80 ? "pointer" : "default" }}>
+              {proc.Objeto ? proc.Objeto.slice(0, 100) : ""}
+              {proc.Objeto && proc.Objeto.length > 100 && <span style={{ opacity: .65, marginLeft: 4, fontSize: 9 }}>(...clique p/ ver completo)</span>}
             </div>
             {/* Chips copiáveis: RC, pré-compra, Nº Processo */}
-            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 3, marginBottom: 4 }}>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
               {proc.NumRC && <CopyChip label="RC" value={proc.NumRC} color="#2e86c1" />}
               {proc.TicketSD && <CopyChip label="Pré-compra" value={proc.TicketSD} color="#27ae60" />}
               {proc.NumProcesso && <CopyChip label="Nº Processo" value={proc.NumProcesso} color="#8e44ad" />}
             </div>
-            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 2 }}>
-              {proc.status && <span style={{ background: "rgba(255,255,255,0.18)", borderRadius: 5, padding: "1px 8px", fontSize: 10, fontWeight: 600 }}>{proc.status}</span>}
-              {proc.statusDet && <span style={{ background: "rgba(255,255,255,0.18)", borderRadius: 5, padding: "1px 8px", fontSize: 10, fontWeight: 600 }}>{proc.statusDet}</span>}
-              {proc.NumPedidoSuite && <span style={{ background: "rgba(255,255,255,0.22)", borderRadius: 5, padding: "1px 8px", fontSize: 10, fontWeight: 700 }}>{proc.NumPedidoSuite}</span>}
-              {_tlSla && _tlBk && <span style={{ background: _tlBk.color, borderRadius: 5, padding: "1px 8px", fontSize: 10, fontWeight: 700 }}>{_tlBk.label} · {_tlSla.pctSLALabel}% SLA</span>}
-              {proc.diasParado > 15 && <span style={{ background: "#c0392b", borderRadius: 5, padding: "1px 8px", fontSize: 10, fontWeight: 700 }}>{String.fromCharCode(9208)} Últ. mov. {proc.diasParado} d.u.</span>}
-              {proc.isNonCPL && <span style={{ background: "rgba(255,255,255,0.15)", borderRadius: 5, padding: "1px 8px", fontSize: 10, fontStyle: "italic" }}>Sem etapas CPL</span>}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {proc.status && <span style={{ background: "rgba(255,255,255,0.12)", borderRadius: 999, padding: "3px 10px", fontSize: 10, fontWeight: 600, border: "1px solid rgba(255,255,255,0.18)" }}>{proc.status}</span>}
+              {proc.statusDet && <span style={{ background: "rgba(255,255,255,0.12)", borderRadius: 999, padding: "3px 10px", fontSize: 10, fontWeight: 600, border: "1px solid rgba(255,255,255,0.18)" }}>{proc.statusDet}</span>}
+              {proc.NumPedidoSuite && <span style={{ background: "rgba(255,255,255,0.18)", borderRadius: 999, padding: "3px 10px", fontSize: 10, fontWeight: 700, border: "1px solid rgba(255,255,255,0.20)" }}>{proc.NumPedidoSuite}</span>}
+              {_tlSla && _tlBk && <span style={{ background: _tlBk.color, borderRadius: 999, padding: "3px 10px", fontSize: 10, fontWeight: 700, color: "#fff" }}>{_tlBk.label} · {_tlSla.pctSLALabel}% SLA</span>}
+              {entregaDate && <span style={{ background: "rgba(255,255,255,0.10)", border: `1px solid ${entregaColor}`, borderRadius: 999, padding: "3px 10px", fontSize: 10, fontWeight: 700 }}>
+                Entrega prevista: {fmt(entregaDate)}{entregaLabel ? ` · ${entregaLabel}` : ""}
+              </span>}
+              {proc.diasParado > 15 && <span style={{ background: "#c0392b", borderRadius: 999, padding: "3px 10px", fontSize: 10, fontWeight: 700, color: "#fff" }}>{String.fromCharCode(9208)} Últ. mov. {proc.diasParado} d.u.</span>}
+              {proc.isNonCPL && <span style={{ background: "rgba(255,255,255,0.10)", borderRadius: 999, padding: "3px 10px", fontSize: 10, fontStyle: "italic", border: "1px solid rgba(255,255,255,0.16)" }}>Sem etapas CPL</span>}
             </div>
-            {tags.length > 0 && <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>{tags.map(t => <TagBadge key={t} tag={t} small />)}</div>}
+            {tags.length > 0 && <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 8 }}>{tags.map(t => <TagBadge key={t} tag={t} small onDark />)}</div>}
           </div>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, flexShrink: 0 }}>
-            <button onClick={onClose} style={{ background: "none", border: "none", color: "#fff", fontSize: 22, cursor: "pointer" }}>×</button>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, flexShrink: 0 }}>
+            <button onClick={onClose} title="Fechar"
+              style={{ background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.20)", color: "#fff", fontSize: 18, lineHeight: 1, cursor: "pointer", width: 30, height: 30, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
             <button onClick={() => onToggleWatch && onToggleWatch(proc)} title={isWatched ? "Remover do acompanhamento" : "Acompanhar processo"}
-              style={{ background: isWatched ? "#f39c12" : "rgba(255,255,255,0.15)", border: isWatched ? "2px solid #f39c12" : "1px solid rgba(255,255,255,0.3)", borderRadius: 8, padding: "4px 10px", cursor: "pointer", fontSize: 14, color: "#fff", transition: "all .2s" }}>
+              style={{ background: isWatched ? "rgba(243,156,18,0.95)" : "rgba(255,255,255,0.10)", border: isWatched ? "1px solid #f39c12" : "1px solid rgba(255,255,255,0.22)", borderRadius: 999, padding: "5px 12px", cursor: "pointer", fontSize: 11, color: "#fff", fontWeight: 600, transition: "all .2s", whiteSpace: "nowrap" }}>
               {isWatched ? "👁 Acompanhando" : "👁 Acompanhar"}
             </button>
           </div>
         </div>
-        <div style={{ overflow: "auto", padding: "16px 22px", flex: 1 }}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-            <button onClick={() => setShowHist(true)}
-              style={{ background: "var(--header2)", color: "#fff", border: "none", borderRadius: 7, padding: "8px 18px", cursor: "pointer", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
-              Histórico
-              {proc.Historico && <span style={{ background: "#2e86c1", borderRadius: 8, padding: "0 7px", fontSize: 10 }}>NCL</span>}
-              {proc.HistoricoCPL && <span style={{ background: "#8e44ad", borderRadius: 8, padding: "0 7px", fontSize: 10 }}>CPL</span>}
-              {proc.HistoricoScont && <span style={{ background: "#16a085", borderRadius: 8, padding: "0 7px", fontSize: 10 }}>Scont</span>}
-              {!proc.Historico && !proc.HistoricoCPL && !proc.HistoricoScont && <span style={{ opacity: .6, fontWeight: 400, fontSize: 11 }}>(sem)</span>}
+
+        {/* ── Corpo ─────────────────────────────────────────────── */}
+        <div style={{ overflow: "auto", padding: "18px 24px", flex: 1, background: "var(--gaq-bg)" }}>
+          {/* Barra de ações */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+            <button onClick={() => setShowHist(true)} className="gaq-btn"
+              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600 }}>
+              <Icon name="clock" size={13}/> Histórico
+              {proc.Historico && <span style={{ background: "#2e86c1", color: "#fff", borderRadius: 999, padding: "1px 7px", fontSize: 9, fontWeight: 700 }}>NCL</span>}
+              {proc.HistoricoCPL && <span style={{ background: "#8e44ad", color: "#fff", borderRadius: 999, padding: "1px 7px", fontSize: 9, fontWeight: 700 }}>CPL</span>}
+              {proc.HistoricoScont && <span style={{ background: "#16a085", color: "#fff", borderRadius: 999, padding: "1px 7px", fontSize: 9, fontWeight: 700 }}>Scont</span>}
+              {!proc.Historico && !proc.HistoricoCPL && !proc.HistoricoScont && <span style={{ opacity: .55, fontWeight: 400, fontSize: 11 }}>(sem)</span>}
             </button>
-            <button onClick={() => onOpenTags(proc)}
-              style={{ background: "#34495e", color: "#fff", border: "none", borderRadius: 7, padding: "8px 18px", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
-              Tags ({tags.length})
+            <button onClick={() => onOpenTags(proc)} className="gaq-btn"
+              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600 }}>
+              <Icon name="tag" size={13}/> Tags ({tags.length})
             </button>
             <button onClick={() => setShowObjeto(s => !s)}
-              style={{ background: showObjeto ? "#2e86c1" : "var(--border2)", color: showObjeto ? "#fff" : "var(--text2)", border: "none", borderRadius: 7, padding: "8px 18px", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
-              📝 Objeto {showObjeto ? "▲" : "▼"}
+              className={showObjeto ? "gaq-btn is-primary" : "gaq-btn"}
+              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600 }}>
+              <Icon name="doc" size={13}/> Objeto {showObjeto ? "▲" : "▼"}
             </button>
             {!hidePredictions && proc.emA && Object.keys(predictions).length > 0 && (
               <button onClick={() => setShowPredictions(p => !p)}
-                style={{ background: showPredictions ? "#e67e22" : "var(--border2)", color: showPredictions ? "#fff" : "var(--text2)", border: "none", borderRadius: 7, padding: "8px 18px", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
-                🔮 Previsões {showPredictions ? "ON" : "OFF"}
+                className="gaq-btn"
+                style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, background: showPredictions ? "#e67e22" : "var(--gaq-surface)", color: showPredictions ? "#fff" : "var(--gaq-text)", borderColor: showPredictions ? "#e67e22" : "var(--gaq-line)" }}>
+                <Icon name="spark" size={13}/> Previsões {showPredictions ? "ON" : "OFF"}
               </button>
             )}
             <div style={{ position: "relative" }}>
-              <button onClick={() => setShowCronMenu(m => !m)}
-                style={{ background: "#1a5276", color: "#fff", border: "none", borderRadius: 7, padding: "8px 16px", cursor: "pointer", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
-                📅 Cronograma {showCronMenu ? "▲" : "▼"}
+              <button onClick={() => setShowCronMenu(m => !m)} className="gaq-btn is-primary"
+                style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600 }}>
+                <Icon name="calendar" size={13}/> Cronograma {showCronMenu ? "▲" : "▼"}
               </button>
               {showCronMenu && (
-                <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, background: "var(--card)", borderRadius: 10, boxShadow: "0 6px 24px #0004", zIndex: 50, minWidth: 180, overflow: "hidden", border: "1px solid var(--border2)" }}>
+                <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, background: "var(--gaq-surface)", borderRadius: 10, boxShadow: "var(--gaq-shadow-2)", zIndex: 50, minWidth: 200, overflow: "hidden", border: "1px solid var(--gaq-line)" }}>
                   <button onClick={() => { exportCronogramaExcel(proc, phaseIntervals); setShowCronMenu(false); }}
-                    style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", background: "none", border: "none", borderBottom: "1px solid var(--border2)", color: "var(--text)", cursor: "pointer", fontSize: 13, textAlign: "left" }}>
-                    <span style={{ fontSize: 16 }}>📊</span>
-                    <div><div style={{ fontWeight: 700 }}>Exportar Excel</div><div style={{ fontSize: 10, color: "var(--text3)" }}>Cronograma + dados do processo</div></div>
+                    style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", background: "none", border: "none", borderBottom: "1px solid var(--gaq-line)", color: "var(--gaq-text)", cursor: "pointer", fontSize: 13, textAlign: "left" }}
+                    onMouseEnter={e => e.currentTarget.style.background = "var(--gaq-bg-2)"}
+                    onMouseLeave={e => e.currentTarget.style.background = "none"}>
+                    <Icon name="download" size={14}/>
+                    <div><div style={{ fontWeight: 700 }}>Exportar Excel</div><div style={{ fontSize: 10, color: "var(--gaq-text-3)" }}>Cronograma + dados do processo</div></div>
                   </button>
                   <button onClick={() => { exportCronogramaPDF(proc, phaseIntervals); setShowCronMenu(false); }}
-                    style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", background: "none", border: "none", color: "var(--text)", cursor: "pointer", fontSize: 13, textAlign: "left" }}>
-                    <span style={{ fontSize: 16 }}>🖨️</span>
-                    <div><div style={{ fontWeight: 700 }}>Gerar PDF</div><div style={{ fontSize: 10, color: "var(--text3)" }}>Cronograma para impressão</div></div>
+                    style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", background: "none", border: "none", color: "var(--gaq-text)", cursor: "pointer", fontSize: 13, textAlign: "left" }}
+                    onMouseEnter={e => e.currentTarget.style.background = "var(--gaq-bg-2)"}
+                    onMouseLeave={e => e.currentTarget.style.background = "none"}>
+                    <Icon name="doc" size={14}/>
+                    <div><div style={{ fontWeight: 700 }}>Gerar PDF</div><div style={{ fontSize: 10, color: "var(--gaq-text-3)" }}>Cronograma para impressão</div></div>
                   </button>
                 </div>
               )}
@@ -910,84 +934,106 @@ const TimelineModal = ({ proc, onClose, onOpenTags, onUpdate, phaseIntervals, on
 
           {/* Objeto completo (expandível) */}
           {showObjeto && proc.Objeto && (
-            <div style={{ background: "var(--card2)", border: "1px solid var(--border)", borderRadius: 8, padding: "12px 16px", marginBottom: 14, animation: "fadeSlideIn .2s ease-out" }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: .4, marginBottom: 6 }}>Objeto da Contratação</div>
-              <div style={{ fontSize: 12, color: "var(--text)", lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{proc.Objeto}</div>
+            <div className="gaq-card" style={{ padding: "14px 16px", marginBottom: 14, animation: "fadeSlideIn .2s ease-out" }}>
+              <div className="gaq-eyebrow" style={{ marginBottom: 6 }}>Objeto da Contratação</div>
+              <div style={{ fontSize: 13, color: "var(--gaq-text)", lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{proc.Objeto}</div>
             </div>
           )}
 
-          {/* Previsão de conclusão */}
+          {/* Previsão de conclusão — estilo clean */}
           {proc.emA && totalPrediction && showPredictions && (
-            <div style={{ background: "linear-gradient(135deg, #fef9e7 0%, #fdebd0 100%)", border: "2px solid #e67e22", borderRadius: 10, padding: "12px 16px", marginBottom: 14 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 12, color: "#d35400" }}>🔮 Previsão de Conclusão</div>
-                  <div style={{ fontSize: 11, color: "#7d6608", marginTop: 2 }}>
-                    Baseada na média histórica de processos na modalidade <b>{proc.Modalidade || "N/I"}</b> (todos com ambas datas preenchidas)
+            <div className="gaq-card" style={{ padding: "14px 18px", marginBottom: 14, background: "linear-gradient(180deg, #e67e221A 0%, var(--gaq-surface) 100%)", borderTop: "3px solid #e67e22" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div className="gaq-eyebrow" style={{ color: "#d35400", marginBottom: 4 }}>Previsão de Conclusão</div>
+                  <div style={{ fontSize: 12, color: "var(--gaq-text-2)", lineHeight: 1.55 }}>
+                    Baseada na média histórica de processos na modalidade <b style={{ color: "var(--gaq-text)" }}>{proc.Modalidade || "N/I"}</b> (todos com ambas datas preenchidas).
                   </div>
                 </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: "#d35400" }}>~{totalPrediction.date.toLocaleDateString("pt-BR")}</div>
-                  <div style={{ fontSize: 10, color: "#7d6608" }}>≈ {totalPrediction.daysFromNow} dias úteis (a partir de hoje)</div>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <div className="gaq-num" style={{ fontSize: 22, fontWeight: 800, color: "#d35400", letterSpacing: "-0.02em" }}>~{totalPrediction.date.toLocaleDateString("pt-BR")}</div>
+                  <div style={{ fontSize: 11, color: "var(--gaq-text-3)", marginTop: 2 }}>≈ {totalPrediction.daysFromNow} d.u. a partir de hoje</div>
                 </div>
               </div>
             </div>
           )}
 
-          <div style={{ borderTop: "1px solid var(--border2)", paddingTop: 14 }}>
+          {/* Linha do tempo das fases */}
+          <div className="gaq-card" style={{ padding: "16px 18px 8px" }}>
+            <div className="gaq-eyebrow" style={{ marginBottom: 12 }}>Etapas do processo</div>
             {ents.map((en, idx) => {
               let prev = null;
               for (let i = idx - 1; i >= 0; i--) { if (ents[i].date) { prev = ents[i].date; break; } }
               const intv = (en.date && prev) ? du(prev, en.date) : null;
               const pred = (!en.date && showPredictions) ? predictions[en.key] : null;
               const isPred = !!pred && !en.date;
+              const isLast = idx === ents.length - 1;
+              const phaseColor = en.isCPL ? "#8e44ad" : "#1a5276";
               return (
-                <div key={en.label} style={{ display: "flex", minHeight: 50 }}>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 26, flexShrink: 0 }}>
-                    <div style={{ width: 12, height: 12, borderRadius: "50%", marginTop: 4, flexShrink: 0,
-                      background: en.date ? (en.isCPL ? "#8e44ad" : "#1a5276") : isPred ? "#e67e2266" : "var(--border)",
-                      border: `2px ${isPred ? "dashed" : "solid"} ${en.date ? (en.isCPL ? "#8e44ad" : "#1a5276") : isPred ? "#e67e22" : "var(--input-bd)"}` }} />
-                    {idx < ents.length - 1 && <div style={{ width: 2, flex: 1, background: isPred ? "#e67e2244" : "var(--border2)", minHeight: 20, borderLeft: isPred ? "none" : "none", borderRight: isPred ? "1px dashed #e67e2266" : "none" }} />}
+                <div key={en.label} style={{ display: "flex", minHeight: 54 }}>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 28, flexShrink: 0 }}>
+                    <div style={{ width: 14, height: 14, borderRadius: "50%", marginTop: 4, flexShrink: 0,
+                      background: en.date ? phaseColor : isPred ? "#e67e2226" : "var(--gaq-bg-2)",
+                      border: `2px ${isPred ? "dashed" : "solid"} ${en.date ? phaseColor : isPred ? "#e67e22" : "var(--gaq-line)"}`,
+                      boxShadow: en.date ? `0 0 0 3px ${phaseColor}1A` : "none" }} />
+                    {!isLast && <div style={{ width: 2, flex: 1, minHeight: 22,
+                      background: isPred ? "transparent" : "var(--gaq-line)",
+                      borderLeft: isPred ? "2px dashed #e67e2266" : "none" }} />}
                   </div>
-                  <div style={{ flex: 1, paddingBottom: 12, paddingLeft: 8 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <div>
-                        <div style={{ fontSize: 10, fontWeight: 600, color: en.date ? (en.isCPL ? "#8e44ad" : "var(--text2)") : isPred ? "#e67e22" : "var(--border)", textTransform: "uppercase", letterSpacing: .3, maxWidth: 340 }}>
-                          {en.label}
-                          {PHASE_RESP[en.key] && <span style={{ fontSize: 8, fontWeight: 700, color: en.date ? "#fff" : "var(--text3)", background: en.date ? (en.isCPL ? "#8e44ad88" : "#1a527688") : "var(--border2)", borderRadius: 3, padding: "1px 5px", marginLeft: 5, textTransform: "none", letterSpacing: 0 }}>{PHASE_RESP[en.key]}</span>}
+                  <div style={{ flex: 1, paddingBottom: 14, paddingLeft: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: en.date ? (en.isCPL ? "#8e44ad" : "var(--gaq-text-3)") : isPred ? "#e67e22" : "var(--gaq-text-3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 3, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          <span>{en.label}</span>
+                          {PHASE_RESP[en.key] && <span style={{ fontSize: 9, fontWeight: 700, color: en.date ? "#fff" : "var(--gaq-text-3)", background: en.date ? phaseColor : "var(--gaq-bg-2)", border: en.date ? "none" : "1px solid var(--gaq-line)", borderRadius: 999, padding: "1px 7px", textTransform: "none", letterSpacing: 0 }}>{PHASE_RESP[en.key]}</span>}
                         </div>
                         {en.date ? (
-                          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{fmt(en.date)}</div>
+                          <div className="gaq-num" style={{ fontSize: 14, fontWeight: 700, color: "var(--gaq-text)", letterSpacing: "-0.01em" }}>{fmt(en.date)}</div>
                         ) : isPred ? (
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "#e67e22", fontStyle: "italic" }}>
-                            ~{pred.date.toLocaleDateString("pt-BR")}
-                            <span style={{ fontSize: 9, fontWeight: 400, color: "#b7950b", marginLeft: 6 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "#e67e22", fontStyle: "italic", display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+                            <span>~{pred.date.toLocaleDateString("pt-BR")}</span>
+                            <span style={{ fontSize: 10, fontWeight: 500, color: "var(--gaq-text-3)", fontStyle: "normal" }}>
                               previsão ({pred.source === "modalidade" ? proc.Modalidade : "geral"} · ~{pred.avg} d.u. · {pred.n} amostras)
                             </span>
                           </div>
                         ) : (
-                          <div style={{ fontSize: 13, fontWeight: 400, color: "var(--border)" }}>—</div>
+                          <div style={{ fontSize: 13, fontWeight: 400, color: "var(--gaq-text-3)" }}>—</div>
                         )}
                       </div>
-                      {intv !== null && <div style={{ textAlign: "right", paddingTop: 1 }}>
-                        <div style={{ fontSize: 8, color: "var(--text3)", textTransform: "uppercase" }}>intervalo</div>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: intv > 50 ? "#c0392b" : intv > 20 ? "#e67e22" : "#27ae60" }}>+{intv} d.u.</div>
-                      </div>}
-                      {isPred && <div style={{ textAlign: "right", paddingTop: 1 }}>
-                        <div style={{ fontSize: 8, color: "#e67e22", textTransform: "uppercase" }}>estimado</div>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: "#e67e22" }}>~{pred.avg} d.u.</div>
-                      </div>}
+                      {intv !== null && (
+                        <div style={{ textAlign: "right", flexShrink: 0 }}>
+                          <div style={{ fontSize: 8, color: "var(--gaq-text-3)", textTransform: "uppercase", letterSpacing: ".04em" }}>intervalo</div>
+                          <div className="gaq-num" style={{ fontSize: 13, fontWeight: 700, color: intv > 50 ? "#c0392b" : intv > 20 ? "#e67e22" : "#27ae60" }}>+{intv} d.u.</div>
+                        </div>
+                      )}
+                      {isPred && (
+                        <div style={{ textAlign: "right", flexShrink: 0 }}>
+                          <div style={{ fontSize: 8, color: "#e67e22", textTransform: "uppercase", letterSpacing: ".04em" }}>estimado</div>
+                          <div className="gaq-num" style={{ fontSize: 13, fontWeight: 600, color: "#e67e22" }}>~{pred.avg} d.u.</div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
               );
             })}
           </div>
-          <div style={{ marginTop: 4, background: "var(--card2)", borderRadius: 7, padding: "8px 10px", fontSize: 10, color: "var(--text3)" }}>
-            d.u. = dias úteis · <span style={{ color: "#8e44ad", fontWeight: 600 }}>roxo</span> = etapas CPL · cinza = não preenchida · <span style={{ background: "#1a527688", color: "#fff", borderRadius: 3, padding: "0 4px", fontSize: 8 }}>badge</span> = área responsável
-            {showPredictions && Object.keys(predictions).length > 0 && <> · <span style={{ color: "#e67e22", fontWeight: 600 }}>laranja tracejado</span> = previsão baseada em histórico (todos os processos)</>}
-          </div>
 
+          {/* Legenda */}
+          <div style={{ marginTop: 12, padding: "10px 14px", background: "var(--gaq-bg-2)", border: "1px solid var(--gaq-line)", borderRadius: 10, fontSize: 11, color: "var(--gaq-text-3)", lineHeight: 1.55 }}>
+            <b style={{ color: "var(--gaq-text-2)" }}>Legenda:</b>
+            <span style={{ marginLeft: 6 }}>d.u. = dias úteis</span>
+            <span style={{ margin: "0 6px" }}>·</span>
+            <span style={{ color: "#8e44ad", fontWeight: 600 }}>roxo</span> = etapas CPL
+            <span style={{ margin: "0 6px" }}>·</span>
+            <span>cinza = não preenchida</span>
+            <span style={{ margin: "0 6px" }}>·</span>
+            <span style={{ background: "#1a5276", color: "#fff", borderRadius: 999, padding: "1px 7px", fontSize: 9, fontWeight: 700 }}>badge</span> = área responsável
+            {showPredictions && Object.keys(predictions).length > 0 && (<>
+              <span style={{ margin: "0 6px" }}>·</span>
+              <span style={{ color: "#e67e22", fontWeight: 600 }}>laranja tracejado</span> = previsão baseada em histórico
+            </>)}
+          </div>
         </div>
       </div>
     </div>
@@ -1063,7 +1109,8 @@ const ProcCard = ({ r, tipo, onClickComp, onClickProc, onOpenTags, tagVersion, o
 
 const MiniTimeline = ({ r }) => {
   if (!r || r.faseAtualIdx < 0) return null;
-  const total = r.isNonCPL ? (IDX_ENVIO_PEDIDO + 1) : TL_COLS.length;
+  const tlColsR = getTLColsForProc(r);
+  const total = r.isNonCPL ? (IDX_ENVIO_PEDIDO + 1) : tlColsR.length;
   const cur = Math.min(r.faseAtualIdx, total - 1);
   const pct = Math.round((cur / Math.max(total - 1, 1)) * 100);
   const color = r.faseSubarea === "CPL" ? "#8e44ad" : r.faseSubarea === "Scont" ? "#16a085" : "#2e86c1";
@@ -1162,7 +1209,6 @@ function App() {
   const SLIDESHOW_LABELS = { overview: "Visão Geral", executivo: "Executivo", operacional: "Operacional", dirTimeline: "Timeline", cronograma: "Cronograma", alertaRC: "Alerta RC", alertaSD: "Alerta Pré-compra", mapeamento: "Mapeamento", planejamento: "Planejamento" };
   const [spotlight, setSpotlight] = useState(false);
   const spotlightRef = useRef(null);
-  const SENHA_CORRETA = "GAQ2026";
 
   // ── Perfis de acesso — definidos em auth.js como var PERFIS_ACESSO (global) ──
 
@@ -1198,9 +1244,10 @@ function App() {
   const isDiretor = !!loginDiretor;
   const isAdminMaster = !!loginMaster;
 
-  function handleLogin() {
-    if (typeof ADMIN_MASTER_PERFIS !== "undefined" && Object.prototype.hasOwnProperty.call(ADMIN_MASTER_PERFIS, loginInput)) {
-      const master = ADMIN_MASTER_PERFIS[loginInput];
+  async function handleLogin() {
+    const inputHash = await gaqHashSenha(loginInput);
+    if (typeof ADMIN_MASTER_PERFIS !== "undefined" && Object.prototype.hasOwnProperty.call(ADMIN_MASTER_PERFIS, inputHash)) {
+      const master = ADMIN_MASTER_PERFIS[inputHash];
       try {
         sessionStorage.setItem("painel_login_ok", "1");
         sessionStorage.setItem("painel_login_master", JSON.stringify(master));
@@ -1216,8 +1263,8 @@ function App() {
       setLoginErroMsg(false);
       setLoginInput("");
       if (base.length > 0) setAba("qualidade");
-    } else if (Object.prototype.hasOwnProperty.call(PERFIS_ACESSO, loginInput)) {
-      const user = PERFIS_ACESSO[loginInput];
+    } else if (Object.prototype.hasOwnProperty.call(PERFIS_ACESSO, inputHash)) {
+      const user = PERFIS_ACESSO[inputHash];
       try {
         sessionStorage.setItem("painel_login_ok", "1");
         sessionStorage.setItem("painel_login_user", user || "");
@@ -1237,9 +1284,10 @@ function App() {
     }
   }
 
-  function handleAreaLogin() {
-    if (typeof AREA_PERFIS !== "undefined" && Object.prototype.hasOwnProperty.call(AREA_PERFIS, areaPassInput)) {
-      const area = AREA_PERFIS[areaPassInput];
+  async function handleAreaLogin() {
+    const inputHash = await gaqHashSenha(areaPassInput);
+    if (typeof AREA_PERFIS !== "undefined" && Object.prototype.hasOwnProperty.call(AREA_PERFIS, inputHash)) {
+      const area = AREA_PERFIS[inputHash];
       try {
         sessionStorage.setItem("painel_login_ok", "1");
         sessionStorage.setItem("painel_login_area", area || "");
@@ -1261,18 +1309,18 @@ function App() {
     }
   }
 
-  function handleDiretorLogin() {
-    const senha = dirPassInput;
-    if (typeof DIRETOR_PERFIS !== "undefined" && Object.prototype.hasOwnProperty.call(DIRETOR_PERFIS, senha)) {
-      const cfg = DIRETOR_PERFIS[senha];
+  async function handleDiretorLogin() {
+    const inputHash = await gaqHashSenha(dirPassInput);
+    if (typeof DIRETOR_PERFIS !== "undefined" && Object.prototype.hasOwnProperty.call(DIRETOR_PERFIS, inputHash)) {
+      const cfg = DIRETOR_PERFIS[inputHash];
       try {
         sessionStorage.setItem("painel_login_ok", "1");
         sessionStorage.setItem("painel_login_diretor", JSON.stringify(cfg));
         sessionStorage.setItem("painel_login_user", "");
         sessionStorage.setItem("painel_login_area", "");
         sessionStorage.removeItem("painel_login_master");
-        // Persistir senha no localStorage para auto-login futuro (só nesta máquina/navegador)
-        localStorage.setItem("painel_diretor_remember", senha);
+        // Persistir hash no localStorage para auto-login futuro (só nesta máquina/navegador)
+        localStorage.setItem("painel_diretor_remember", inputHash);
       } catch {}
       setLoginDiretor(cfg);
       setLoginMaster(null);
@@ -1373,6 +1421,15 @@ useEffect(() => {
   const [gestaoUnlocked, setGestaoUnlocked] = useState(false);
   const [gestaoPassInput, setGestaoPassInput] = useState("");
   const [gestaoPassErr, setGestaoPassErr] = useState(false);
+  // ── Estado do Gerador de Senha (Admin Master) ──
+  const [genTipoPerfil, setGenTipoPerfil] = useState("perfil");
+  const [genSenha, setGenSenha] = useState("");
+  const [genNome, setGenNome] = useState("");
+  const [genArea, setGenArea] = useState("");
+  const [genAreasDestaque, setGenAreasDestaque] = useState("");
+  const [genIsAdmin, setGenIsAdmin] = useState(false);
+  const [genResultado, setGenResultado] = useState(null); // { linha, varName, tipo }
+  const [genCopiado, setGenCopiado] = useState(false);
   const [metroComp, setMetroComp] = useState("");
   const [metroBusca, setMetroBusca] = useState("");
   const [metroAgrupado, setMetroAgrupado] = useState(false);
@@ -2121,6 +2178,8 @@ useEffect(() => {
     const entregaCurta = classificados.filter(r => r._sla.entregaProxima);
     const semDataEntrega = classificados.filter(r => !r._sla.temEntrega);
     const consumoElevado = classificados.filter(r => (r._sla.pctSLA || 0) >= 0.7);
+    const atencaoForte = classificados.filter(r => r._sla.atencaoForte);
+    const atencaoCombinada = classificados.filter(r => r._sla.atencaoCombinada);
     const areaScoreDir = calcAreaSlaScore(classificados, phaseIntervals);
 
     const summarizeByMod = (rows) => Object.entries(rows.reduce((acc, r) => {
@@ -2185,6 +2244,8 @@ useEffect(() => {
       entregaCurta,
       semDataEntrega,
       consumoElevado,
+      atencaoForte,
+      atencaoCombinada,
       slaVencidos,
       mediaScore: areaScoreDir.score,
       mediaConsumoPrazo: classificados.length ? Math.round(classificados.reduce((s, r) => s + (r._sla.pctSLALabel || 0), 0) / classificados.length) : 0,
@@ -2685,10 +2746,22 @@ const topModLentas = (() => {
       color: "#d35400",
       bg: "#fff4ea",
       lines: [
-        "Crítico exige as duas condições ao mesmo tempo: SLA vencido e entrega ou cronograma rompidos.",
+        "Crítico exige duas condições simultâneas: SLA vencido E entrega vencida (ou projeção fora do cronograma).",
         "Para RC, a entrega fica crítica quando a projeção de conclusão passa da data prevista ou a entrega já venceu.",
-        "Para pré-compra sem RC, a entrega é avaliada pelo pior cenário de 90 dias úteis.",
-        "Casos próximos do crítico ficam em Atenção e não entram nesta caixa.",
+        "Para pré-compra sem RC, o bucket máximo possível é SLA Vencido — não atinge Crítico (sem entrega definida).",
+        "Atenção (próximo de Crítico) dispara quando qualquer margem individual fica ≤ 3 d.u. OU SLA e entrega ambos ≤ 8 d.u. — não vira Crítico até o SLA realmente estourar.",
+      ],
+    },
+    atencao: {
+      title: "Atenção (regra Opção C)",
+      color: "#e67e22",
+      bg: "#fff7e6",
+      lines: [
+        "Atenção é o aviso de quase-crítico: dispara somente quando o processo está perto de virar Crítico, não como early-warning genérico.",
+        "Sinal forte (qualquer um dispara sozinho): margem de SLA ≤ 3 d.u., OU margem de entrega ≤ 3 d.u., OU a projeção atual já estoura o SLA.",
+        "Sinal combinado (precisa dos dois juntos): margem de SLA ≤ 8 d.u. E margem de entrega ≤ 8 d.u. — pressão dupla mesmo que cada lado isolado não seja crítico.",
+        "Margem de SLA = prazo da modalidade − (consumido + projetado restante). Margem de entrega = d.u. até a data prevista − d.u. até a conclusão projetada.",
+        "Um processo com 15 d.u. de folga numa frente e 30 d.u. na outra não entra em Atenção — está confortável. A régua agora corta só o realmente apertado.",
       ],
     },
     sla_cumprido: {
@@ -2803,10 +2876,10 @@ const topModLentas = (() => {
     ];
 
     const semaforo = [
-      { label: "Crítico", rows: criticoRows, color: "#d35400", detail: "SLA vencido e entrega ou cronograma rompidos." },
-      { label: "Atenção", rows: atencaoRows, color: "#ff9500", detail: "Margem curta para SLA ou entrega. Pré-compra sem RC não entra aqui." },
-      { label: "SLA Vencido", rows: slaVencidoRows, color: "#ff3b30", detail: "Fora do SLA, mas ainda com cronograma de entrega preservado." },
-      { label: "SLA Atendido", rows: regularRows, color: "#34c759", detail: "Dentro do SLA da modalidade e dentro da entrega prevista." },
+      { label: "Crítico", rows: criticoRows, color: "#d35400", detail: "SLA vencido E entrega vencida (ou projeção fora do cronograma)." },
+      { label: "Atenção", rows: atencaoRows, color: "#ff9500", detail: "Margem ≤ 3 d.u. em SLA ou entrega, OU SLA e entrega ambos ≤ 8 d.u., OU projeção estoura SLA." },
+      { label: "SLA Vencido", rows: slaVencidoRows, color: "#ff3b30", detail: "Fora do SLA da modalidade, mas ainda com cronograma de entrega preservado." },
+      { label: "SLA Atendido", rows: regularRows, color: "#34c759", detail: "Dentro do SLA da modalidade e sem pressão relevante na entrega." },
     ];
 
     const critBase = criticoRows.length > 0 ? criticoRows : (atencaoRows.length > 0 ? atencaoRows : slaVencidoRows);
@@ -2967,11 +3040,12 @@ const topModLentas = (() => {
       // Cancelados/fracassados podem ter ordem de datas atípica por conta do encerramento — ignorar
       if (r.isCanceled || r.isFailed) return [];
       const modNrm = nrm(r.Modalidade || "");
-      const idxs = r.NumRC ? getTLColsForMod(modNrm) : [0, 1, 2];
+      const tlColsR = getTLColsForProc(r);
+      const idxs = r.NumRC ? getTLColsForMod(modNrm, r) : [0, 1, 2];
       let prevDate = null;
       let prevLabel = "";
       for (const idx of idxs) {
-        const [label, key] = TL_COLS[idx] || [];
+        const [label, key] = tlColsR[idx] || [];
         if (!key) continue;
         const current = pd(r[key]);
         if (!current) continue;
@@ -3002,8 +3076,13 @@ const topModLentas = (() => {
         label: "RC sem recebimento",
         severity: "critical",
         color: "#c0392b",
-        desc: "Processos com RC aberta, mas sem data de recebimento da RC. Cancelados/fracassados são excluídos.",
-        rows: addDecor(rows.filter(r => r.NumRC && !r.aberturaRC && !r.isCanceled && !r.isFailed), "rc_sem_recebimento", "RC sem data de recebimento."),
+        desc: "Processos com RC aberta, mas sem data de recebimento da RC. Excluídos: cancelados, fracassados e RCs reprovadas para ajustes (aguardando reenvio).",
+        rows: addDecor(rows.filter(r => {
+          if (!r.NumRC || r.aberturaRC || r.isCanceled || r.isFailed) return false;
+          const sd = (r.statusDet || "").toString().toLowerCase();
+          if (sd.includes("reprovad")) return false; // RC reprovada para ajustes — aguarda reenvio com data nova
+          return true;
+        }), "rc_sem_recebimento", "RC sem data de recebimento."),
       },
       {
         key: "duplicidade_rc",
@@ -3156,6 +3235,7 @@ const topModLentas = (() => {
     const topMods = Object.entries(porMod).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([k,v])=>`${k}: ${v}`).join("; ");
 
     // Top 30 processos críticos com info reduzida (para caber no contexto)
+    const isoDate = d => (d instanceof Date && !isNaN(d)) ? d.toISOString().slice(0,10) : null;
     const topCriticos = ativos.slice().sort((a,b)=>(b.diasTotaisGestao||0)-(a.diasTotaisGestao||0)).slice(0,30).map(r => ({
       rc: r.NumRC || "—",
       sd: r.TicketSD || "—",
@@ -3167,13 +3247,31 @@ const topModLentas = (() => {
       diasRC: r.diasTotaisGestao || 0,
       diasSD: r.diasSDAberto || r.diasSD || 0,
       slaVencido: !!(r.atrasoGeral || r.atrasoSD),
+      dataAberturaRC: isoDate(r.aberturaRC),
+      dataAberturaSD: isoDate(r.aberturaSD),
       objeto: (r.Objeto || "").slice(0, 200),
     }));
+
+    // Top 30 mais recentes por abertura RC (para perguntas de recência)
+    const maisRecentes = ativos.filter(r => r.aberturaRC).slice()
+      .sort((a,b) => b.aberturaRC - a.aberturaRC).slice(0,30).map(r => ({
+        rc: r.NumRC || "—",
+        sd: r.TicketSD || "—",
+        area: r["Área Requisitante"] || "—",
+        modalidade: r.Modalidade || "—",
+        status: r.statusDet || r.status || "—",
+        respAtivo: r.respAtivo || "—",
+        dataAberturaRC: isoDate(r.aberturaRC),
+        dataAberturaSD: isoDate(r.aberturaSD),
+        diasRC: r.diasTotaisGestao || 0,
+        objeto: (r.Objeto || "").slice(0, 200),
+      }));
 
     return {
       meta: { totalBase: baseVis.length, totalAtivos: ativos.length, totalConcluidos: concl.length, totalCancelados: canc.length, totalFracassados: frac.length, slaVencido: slaVencido.length, criticosRC: criticosRC.length, sdSemRC: sdSemRC.length, sdEncSemRC: sdEncSemRC.length },
       distribuicao: { topAreas, topMods },
       topCriticos,
+      maisRecentes,
     };
   }
 
@@ -3200,19 +3298,26 @@ CONTEXTO DA BASE:
 DISTRIBUIÇÃO POR ÁREA (top): ${ctx.distribuicao.topAreas}
 DISTRIBUIÇÃO POR MODALIDADE (top): ${ctx.distribuicao.topMods}
 
-TOP 30 PROCESSOS CRÍTICOS (ordenados por aging RC):
+TOP 30 PROCESSOS CRÍTICOS (ordenados por aging RC desc):
 ${JSON.stringify(ctx.topCriticos, null, 2)}
+
+TOP 30 PROCESSOS MAIS RECENTES (ordenados por dataAberturaRC desc — datas em formato YYYY-MM-DD):
+${JSON.stringify(ctx.maisRecentes, null, 2)}
 
 PERGUNTA DO USUÁRIO: ${q}`;
 
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(window.IA_API_KEY)}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(window.IA_API_KEY)}`;
       const resp = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: systemInstr }] }],
-          generationConfig: { temperature: 0.3, maxOutputTokens: 1500 },
+          generationConfig: {
+            temperature: 0.3,
+            maxOutputTokens: 2048,
+            thinkingConfig: { thinkingBudget: 0 },
+          },
         }),
       });
       if (!resp.ok) {
@@ -3220,9 +3325,14 @@ PERGUNTA DO USUÁRIO: ${q}`;
         throw new Error(`HTTP ${resp.status}: ${errTxt.slice(0, 300)}`);
       }
       const data = await resp.json();
+      const finishReason = data.candidates?.[0]?.finishReason;
       let text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      if (text && finishReason === "MAX_TOKENS") {
+        text += "\n\n_(resposta interrompida no limite de tokens — refaça a pergunta de forma mais específica para um retorno completo)_";
+      }
       if (!text) {
-        if (data.candidates?.[0]?.finishReason === "SAFETY") text = "Resposta bloqueada por filtro de segurança da IA.";
+        if (finishReason === "SAFETY") text = "Resposta bloqueada por filtro de segurança da IA.";
+        else if (finishReason === "MAX_TOKENS") text = "A IA atingiu o limite de tokens antes de gerar texto. Faça uma pergunta mais específica.";
         else if (data.promptFeedback?.blockReason) text = `Pergunta bloqueada: ${data.promptFeedback.blockReason}`;
         else text = "Sem resposta.";
       }
@@ -3331,6 +3441,9 @@ PERGUNTA DO USUÁRIO: ${q}`;
       ["planejamento","compass","Planejamento",null],
       ["pantanal","trend","Pantanal",null],
     ]}] : []),
+    ...(isAdminMaster ? [{ label: "Administração", items: [
+      ["geradorSenha","key","Gerador de Senha",null],
+    ]}] : []),
   ];
 
   // Tab title map
@@ -3340,7 +3453,7 @@ PERGUNTA DO USUÁRIO: ${q}`;
     alertas: "Alertas", alertaSD: "Alerta Pré-compra", alertaRC: "Alerta RC", mapeamento: "Mapeamento",
     gestao: "Performance", planejamento: "Planejamento", pantanal: "Pantanal", nova: "Nova Demanda",
     bal: "Balanceamento", dirHome: "Painel Diretoria", dirDiag: "Diagnóstico",
-    iaInsights: "IA Insights",
+    iaInsights: "IA Insights", geradorSenha: "Gerador de Senha",
   };
 
   return (
@@ -3952,12 +4065,12 @@ PERGUNTA DO USUÁRIO: ${q}`;
               color: "#e67e22",
               bg: "#fff8f1",
               rows: diag.atencao,
-              subtitle: "Processos próximos do limite da modalidade ou com entrega curta no radar.",
+              subtitle: "Quase-críticos. Disparam quando alguma margem (SLA ou entrega) está ≤ 3 d.u., OU quando SLA e entrega estão ambos ≤ 8 d.u. de margem, OU quando a projeção atual já estoura o SLA.",
               mods: diag.atencaoTopMods,
               items: [
-                { label: ">= 70% do prazo", value: diag.consumoElevado.length },
-                { label: "Entrega <= 15 d.u.", value: diag.entregaCurta.length },
-                        { label: "Score da área", value: diag.mediaScore },
+                { label: "Margem crítica (≤ 3 d.u.)", value: diag.atencaoForte.length, rows: diag.atencaoForte, drillTitle: `Diretoria — Atenção · margem crítica (${scopeLabel})` },
+                { label: "Pressão dupla (≤ 8 d.u.)", value: diag.atencaoCombinada.length, rows: diag.atencaoCombinada, drillTitle: `Diretoria — Atenção · pressão dupla (${scopeLabel})` },
+                { label: "Score da área", value: diag.mediaScore },
               ],
               drillTitle: `Diagnóstico Diretoria — Casos em Atenção (${scopeLabel})`,
             },
@@ -4075,7 +4188,7 @@ PERGUNTA DO USUÁRIO: ${q}`;
                       {[
                         { label: "Entrega vencida", value: diag.entregaVencida.length, color: "#c0392b", onClick: () => openDrill(`Diagnóstico Diretoria — Entrega vencida (${scopeLabel})`, diag.entregaVencida) },
                         { label: "Janela comprometida", value: diag.janelaComprometida.length, color: "#d35400", onClick: () => openDrill(`Diagnóstico Diretoria — Janela comprometida (${scopeLabel})`, diag.janelaComprometida) },
-                        { label: "Entrega <= 15 d.u.", value: diag.entregaCurta.length, color: "#f39c12", onClick: () => openDrill(`Diagnóstico Diretoria — Entrega curta (${scopeLabel})`, diag.entregaCurta) },
+                        { label: "Entrega ≤ 20 d.u.", value: diag.entregaCurta.length, color: "#f39c12", onClick: () => openDrill(`Diagnóstico Diretoria — Entrega curta (${scopeLabel})`, diag.entregaCurta) },
                         { label: "Sem data de entrega", value: diag.semDataEntrega.length, color: "#7f8c8d", onClick: () => openDrill(`Diagnóstico Diretoria — Sem data de entrega (${scopeLabel})`, diag.semDataEntrega) },
                       ].map(item => (
                         <button key={item.label} onClick={item.onClick} disabled={item.value === 0}
@@ -4657,11 +4770,11 @@ PERGUNTA DO USUÁRIO: ${q}`;
                   <div style={{ fontSize: 13, fontWeight: 700, color: "#1a5276", marginBottom: 6 }}>Acesso restrito</div>
                   <div style={{ fontSize: 12, color: "var(--text2)", marginBottom: 12 }}>Digite a senha para liberar o upload.</div>
                   <input type="password" value={senhaInput} onChange={e => { setSenhaInput(e.target.value); setSenhaErro(false); }}
-                    onKeyDown={e => { if (e.key === "Enter") { if (senhaInput === SENHA_CORRETA) { setSenhaOk(true); setSenhaErro(false); } else { setSenhaErro(true); setSenhaInput(""); } } }}
+                    onKeyDown={async e => { if (e.key === "Enter") { const h = await gaqHashSenha(senhaInput); if (typeof UPLOAD_PASS !== "undefined" && h === UPLOAD_PASS) { setSenhaOk(true); setSenhaErro(false); } else { setSenhaErro(true); setSenhaInput(""); } } }}
                     placeholder="Senha de acesso..."
                     style={{ width: "100%", padding: "9px 12px", borderRadius: 7, border: `1.5px solid ${senhaErro ? "#e74c3c" : "var(--input-bd)"}`, fontSize: 13, background: "var(--input-bg)", color: "var(--text)", marginBottom: 8 }} />
                   {senhaErro && <div style={{ fontSize: 12, color: "#c0392b", marginBottom: 8 }}>Senha incorreta.</div>}
-                  <button onClick={() => { if (senhaInput === SENHA_CORRETA) { setSenhaOk(true); setSenhaErro(false); } else { setSenhaErro(true); setSenhaInput(""); } }}
+                  <button onClick={async () => { const h = await gaqHashSenha(senhaInput); if (typeof UPLOAD_PASS !== "undefined" && h === UPLOAD_PASS) { setSenhaOk(true); setSenhaErro(false); } else { setSenhaErro(true); setSenhaInput(""); } }}
                     style={{ background: "#1a5276", color: "#fff", border: "none", borderRadius: 8, padding: "9px 24px", cursor: "pointer", fontWeight: 700, fontSize: 13, width: "100%" }}>Confirmar</button>
                 </div>
               : <>
@@ -4862,18 +4975,26 @@ PERGUNTA DO USUÁRIO: ${q}`;
                           <div className="gaq-eyebrow" style={{ fontSize: 10, marginBottom: 4 }}>Régua SLA e entrega (%)</div>
                           <div className="gaq-meta">Percentual dos processos em andamento por subárea em cada situação da régua global.</div>
                         </div>
+                        <button onClick={() => setOverviewInfoCard(v => v === "atencao" ? "" : "atencao")}
+                          style={{ background: overviewInfoCard === "atencao" ? "#e67e22" : "var(--gaq-line)", border: "none", borderRadius: 999, padding: "5px 12px", cursor: "pointer", fontSize: 11, fontWeight: 700, color: overviewInfoCard === "atencao" ? "#fff" : "var(--gaq-text-2)", display: "inline-flex", alignItems: "center", gap: 6 }}
+                          title="Ver regra de classificação SLA e Atenção">
+                          ℹ Regra de classificação
+                        </button>
                       </div>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14, alignItems: "center" }}>
                         {[
-                          { label: "Crítico", color: "#d35400" },
-                          { label: "Em atenção", color: "#ff9500" },
-                          { label: "SLA vencido", color: "#ff3b30" },
-                          { label: "No prazo", color: "#34c759" },
+                          { label: "Crítico", color: "#d35400", info: "criticos" },
+                          { label: "Em atenção", color: "#ff9500", info: "atencao" },
+                          { label: "SLA vencido", color: "#ff3b30", info: "atrasados_sla" },
+                          { label: "No prazo", color: "#34c759", info: "sla_cumprido" },
                         ].map(legend => (
-                          <span key={legend.label} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999, background: `${legend.color}12`, color: legend.color, fontSize: 11, fontWeight: 600 }}>
-                            <span className="gaq-dot" style={{ background: legend.color, width: 7, height: 7 }} />
+                          <button key={legend.label}
+                            onClick={() => setOverviewInfoCard(v => v === legend.info ? "" : legend.info)}
+                            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999, background: overviewInfoCard === legend.info ? legend.color : `${legend.color}12`, color: overviewInfoCard === legend.info ? "#fff" : legend.color, fontSize: 11, fontWeight: 600, border: `1px solid ${legend.color}33`, cursor: "pointer" }}
+                            title={`Ver regra de ${legend.label}`}>
+                            <span className="gaq-dot" style={{ background: overviewInfoCard === legend.info ? "#fff" : legend.color, width: 7, height: 7 }} />
                             {legend.label}
-                          </span>
+                          </button>
                         ))}
                       </div>
                       <div style={{ display: "grid", gap: 14 }}>
@@ -5430,22 +5551,23 @@ PERGUNTA DO USUÁRIO: ${q}`;
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, marginBottom: 18 }}>
             {[
-              { label: "Processos abertos", value: executiveStrategic.abertos, color: "#1f6feb", bg: "linear-gradient(180deg, #f3f8ff 0%, #ffffff 100%)", border: "#d7e7ff", data: fBase, title: "Executivo — Processos abertos" },
-              { label: "Concluídos", value: executiveStrategic.concluidos, color: "#16a34a", bg: "linear-gradient(180deg, #f1fcf5 0%, #ffffff 100%)", border: "#d8f5e2", data: fBase.filter(r => r.isConcluded), title: "Executivo — Processos concluídos" },
-              { label: "Em andamento", value: executiveStrategic.emAndamento, color: "#0f766e", bg: "linear-gradient(180deg, #effcf8 0%, #ffffff 100%)", border: "#d4f5ed", data: fBack, title: "Executivo — Processos em andamento" },
-              { label: "Cancelados", value: executiveStrategic.cancelados, color: "#ea580c", bg: "linear-gradient(180deg, #fff5ed 0%, #ffffff 100%)", border: "#ffe0cc", data: fBase.filter(r => r.isCanceled), title: "Executivo — Processos cancelados" },
-              { label: "Fracassados", value: executiveStrategic.fracassados, color: "#7c3aed", bg: "linear-gradient(180deg, #f7f1ff 0%, #ffffff 100%)", border: "#eadbff", data: fBase.filter(r => r.isFailed), title: "Executivo — Processos fracassados" },
+              { label: "Processos abertos", value: executiveStrategic.abertos, color: "#1f6feb", data: fBase, title: "Executivo — Processos abertos" },
+              { label: "Concluídos", value: executiveStrategic.concluidos, color: "#16a34a", data: fBase.filter(r => r.isConcluded), title: "Executivo — Processos concluídos" },
+              { label: "Em andamento", value: executiveStrategic.emAndamento, color: "#0f766e", data: fBack, title: "Executivo — Processos em andamento" },
+              { label: "Cancelados", value: executiveStrategic.cancelados, color: "#ea580c", data: fBase.filter(r => r.isCanceled), title: "Executivo — Processos cancelados" },
+              { label: "Fracassados", value: executiveStrategic.fracassados, color: "#7c3aed", data: fBase.filter(r => r.isFailed), title: "Executivo — Processos fracassados" },
             ].map(card => (
               <div
                 key={card.label}
                 onClick={() => setDrillDown({ title: card.title, data: card.data, color: card.color, sourceAba: "executivo" })}
                 style={{
                   cursor: "pointer",
-                  background: card.bg,
-                  border: `1px solid ${card.border}`,
+                  background: `linear-gradient(180deg, ${card.color}1A 0%, var(--gaq-surface) 100%)`,
+                  border: `1px solid ${card.color}33`,
+                  borderTop: `3px solid ${card.color}`,
                   borderRadius: 22,
                   padding: "16px 18px",
-                  boxShadow: "0 10px 26px rgba(15,23,42,0.05)",
+                  boxShadow: "var(--gaq-shadow-1)",
                 }}
               >
                 <div style={{ fontSize: 11, fontWeight: 700, color: "var(--gaq-text-3)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>{card.label}</div>
@@ -7283,6 +7405,176 @@ GAQ — Gerência de Aquisições`;
           <Pagination total={alertRC.length} page={pgAlertRC} pageSize={pgAlertRCSz} onPage={setPgAlertRC} onSize={setPgAlertRCSz} />
         </div>}
 
+        {/* ════════════ ABA: GERADOR DE SENHA (Admin Master) ════════════ */}
+        {aba === "geradorSenha" && isAdminMaster && <div className="anim-fade">
+          <div style={{ background: "linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)", color: "#fff", borderRadius: "var(--gaq-r-xl)", padding: "26px 30px", marginBottom: 18, boxShadow: "var(--gaq-shadow-2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, opacity: .72, letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 4 }}>Admin Master · Cadastro de Senhas</div>
+                <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-.02em" }}>Gerador de Senha</div>
+                <div style={{ fontSize: 12, opacity: .82, marginTop: 6, maxWidth: 720, lineHeight: 1.5 }}>
+                  Use esta tela para criar a linha pronta de uma nova senha, ou substituir uma existente. A senha em si nunca é guardada — só o hash. Após gerar, copie a linha e cole no <code style={{ background: "rgba(255,255,255,0.12)", padding: "1px 6px", borderRadius: 4 }}>auth.js</code> dentro do bloco indicado.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 18 }}>
+            {/* Coluna esquerda — formulário */}
+            <div className="gaq-card" style={{ padding: 22 }}>
+              <div className="gaq-h3" style={{ marginBottom: 4 }}>Dados da nova senha</div>
+              <div className="sub" style={{ marginBottom: 16 }}>Preencha conforme o tipo de perfil escolhido.</div>
+
+              <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--gaq-text-3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>Tipo de perfil</label>
+              <select value={genTipoPerfil} onChange={e => { setGenTipoPerfil(e.target.value); setGenResultado(null); setGenIsAdmin(false); setGenNome(""); setGenArea(""); setGenAreasDestaque(""); }}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--gaq-line)", background: "var(--input-bg)", color: "var(--gaq-text)", fontSize: 13, marginBottom: 16, boxSizing: "border-box" }}>
+                <option value="perfil">Comprador / Avaliador (perfil individual)</option>
+                <option value="admin">Admin (visão completa)</option>
+                <option value="master">Admin Master</option>
+                <option value="area">Área (filtra por área)</option>
+                <option value="diretor">Diretor</option>
+                <option value="gestao">Painel de Gestão</option>
+                <option value="upload">Upload de base</option>
+              </select>
+
+              <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--gaq-text-3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>Senha que o usuário vai digitar</label>
+              <input type="text" value={genSenha} onChange={e => { setGenSenha(e.target.value); setGenResultado(null); }}
+                placeholder="Ex: Joao#Compr2026!"
+                style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--gaq-line)", background: "var(--input-bg)", color: "var(--gaq-text)", fontSize: 13, fontFamily: "var(--gaq-mono)", marginBottom: 16, boxSizing: "border-box" }} />
+
+              {genTipoPerfil === "perfil" && <>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--gaq-text-3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>Nome exato do responsável (filtra processos por este nome)</label>
+                <input type="text" value={genNome} onChange={e => { setGenNome(e.target.value); setGenResultado(null); }}
+                  placeholder="Ex: João Silva"
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--gaq-line)", background: "var(--input-bg)", color: "var(--gaq-text)", fontSize: 13, marginBottom: 16, boxSizing: "border-box" }} />
+              </>}
+
+              {genTipoPerfil === "master" && <>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--gaq-text-3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>Nome de exibição do Admin Master</label>
+                <input type="text" value={genNome} onChange={e => { setGenNome(e.target.value); setGenResultado(null); }}
+                  placeholder="Ex: Maria Silva"
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--gaq-line)", background: "var(--input-bg)", color: "var(--gaq-text)", fontSize: 13, marginBottom: 16, boxSizing: "border-box" }} />
+              </>}
+
+              {genTipoPerfil === "area" && <>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--gaq-text-3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>Código da área (igual ao da coluna ÁREA no dados.js)</label>
+                <input type="text" value={genArea} onChange={e => { setGenArea(e.target.value.toUpperCase()); setGenResultado(null); }}
+                  placeholder="Ex: GTI, PLE, ASCOM, PSC"
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--gaq-line)", background: "var(--input-bg)", color: "var(--gaq-text)", fontSize: 13, fontFamily: "var(--gaq-mono)", marginBottom: 16, boxSizing: "border-box" }} />
+              </>}
+
+              {genTipoPerfil === "diretor" && <>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--gaq-text-3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>Nome do diretor</label>
+                <input type="text" value={genNome} onChange={e => { setGenNome(e.target.value); setGenResultado(null); }}
+                  placeholder="Ex: Carlos Souza"
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--gaq-line)", background: "var(--input-bg)", color: "var(--gaq-text)", fontSize: 13, marginBottom: 12, boxSizing: "border-box" }} />
+                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--gaq-text-3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>Áreas de destaque (separadas por vírgula)</label>
+                <input type="text" value={genAreasDestaque} onChange={e => { setGenAreasDestaque(e.target.value.toUpperCase()); setGenResultado(null); }}
+                  placeholder="Ex: ASCOM, TI, GIN"
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--gaq-line)", background: "var(--input-bg)", color: "var(--gaq-text)", fontSize: 13, fontFamily: "var(--gaq-mono)", marginBottom: 16, boxSizing: "border-box" }} />
+              </>}
+
+              {(genTipoPerfil === "admin" || genTipoPerfil === "gestao" || genTipoPerfil === "upload") && (
+                <div style={{ background: "var(--gaq-bg-2)", borderRadius: 8, padding: "10px 12px", marginBottom: 16, fontSize: 12, color: "var(--gaq-text-3)", border: "1px solid var(--gaq-line)" }}>
+                  {genTipoPerfil === "admin" && <>Administrador comum: visão completa do painel. Não precisa de campos extras.</>}
+                  {genTipoPerfil === "gestao" && <>Senha única que destrava o painel de Gestão. Esta operação <b>substitui</b> a senha atual de gestão.</>}
+                  {genTipoPerfil === "upload" && <>Senha única que libera o upload de base. Esta operação <b>substitui</b> a senha atual de upload.</>}
+                </div>
+              )}
+
+              <button onClick={async () => {
+                if (!genSenha) { alert("Digite a senha que o usuário vai usar."); return; }
+                const hash = await gaqHashSenha(genSenha);
+                let linha = "", varName = "", instrucoes = "";
+                if (genTipoPerfil === "perfil") {
+                  if (!genNome.trim()) { alert("Digite o nome do responsável."); return; }
+                  linha = `  "${hash}": "${genNome.trim()}",`;
+                  varName = "PERFIS_ACESSO";
+                  instrucoes = "Adicione esta linha dentro do bloco PERFIS_ACESSO no auth.js.";
+                } else if (genTipoPerfil === "admin") {
+                  linha = `  "${hash}": null,`;
+                  varName = "PERFIS_ACESSO";
+                  instrucoes = "Adicione esta linha dentro do bloco PERFIS_ACESSO no auth.js.";
+                } else if (genTipoPerfil === "master") {
+                  if (!genNome.trim()) { alert("Digite o nome de exibição."); return; }
+                  linha = `  "${hash}": { nome: "${genNome.trim()}" },`;
+                  varName = "ADMIN_MASTER_PERFIS";
+                  instrucoes = "Adicione esta linha dentro do bloco ADMIN_MASTER_PERFIS no auth.js.";
+                } else if (genTipoPerfil === "area") {
+                  if (!genArea.trim()) { alert("Digite o código da área."); return; }
+                  linha = `  "${hash}": "${genArea.trim()}",`;
+                  varName = "AREA_PERFIS";
+                  instrucoes = "Adicione esta linha dentro do bloco AREA_PERFIS no auth.js.";
+                } else if (genTipoPerfil === "diretor") {
+                  if (!genNome.trim()) { alert("Digite o nome do diretor."); return; }
+                  const areas = genAreasDestaque.split(",").map(a => a.trim()).filter(Boolean).map(a => `"${a}"`).join(", ");
+                  linha = `  "${hash}": { nome: "${genNome.trim()}", areasDestaque: [${areas}] },`;
+                  varName = "DIRETOR_PERFIS";
+                  instrucoes = "Adicione esta linha dentro do bloco DIRETOR_PERFIS no auth.js.";
+                } else if (genTipoPerfil === "gestao") {
+                  linha = `var GESTAO_PASS = "${hash}";`;
+                  varName = "GESTAO_PASS";
+                  instrucoes = "Substitua a linha atual de var GESTAO_PASS = ... no auth.js por esta.";
+                } else if (genTipoPerfil === "upload") {
+                  linha = `var UPLOAD_PASS = "${hash}";`;
+                  varName = "UPLOAD_PASS";
+                  instrucoes = "Substitua a linha atual de var UPLOAD_PASS = ... no auth.js por esta.";
+                }
+                setGenResultado({ linha, varName, instrucoes, hash });
+                setGenCopiado(false);
+              }}
+                style={{ background: "var(--gaq-blue)", color: "#fff", border: "none", borderRadius: 8, padding: "11px 28px", fontWeight: 700, fontSize: 13, cursor: "pointer", width: "100%" }}>
+                Gerar linha para o auth.js
+              </button>
+            </div>
+
+            {/* Coluna direita — resultado */}
+            <div className="gaq-card" style={{ padding: 22 }}>
+              <div className="gaq-h3" style={{ marginBottom: 4 }}>Linha gerada</div>
+              <div className="sub" style={{ marginBottom: 16 }}>Copie a linha abaixo e cole no <code style={{ background: "var(--gaq-bg-2)", padding: "1px 6px", borderRadius: 4, fontSize: 11 }}>auth.js</code>.</div>
+
+              {!genResultado ? (
+                <div style={{ background: "var(--gaq-bg-2)", borderRadius: 8, padding: "30px 16px", textAlign: "center", fontSize: 13, color: "var(--gaq-text-3)", border: "1px dashed var(--gaq-line)" }}>
+                  Preencha os campos ao lado e clique em <b>Gerar</b> para ver a linha aqui.
+                </div>
+              ) : (
+                <>
+                  <div style={{ background: "linear-gradient(180deg, var(--gaq-bg-2) 0%, var(--gaq-surface) 100%)", borderLeft: "3px solid var(--gaq-blue)", borderRadius: 8, padding: "12px 14px", marginBottom: 12, fontSize: 12, color: "var(--gaq-text-2)", lineHeight: 1.5 }}>
+                    <b style={{ color: "var(--gaq-blue)" }}>Onde colar:</b> {genResultado.instrucoes}
+                  </div>
+                  <pre style={{ background: "var(--gaq-bg-2)", borderRadius: 8, padding: "12px 14px", fontSize: 12.5, fontFamily: "var(--gaq-mono)", color: "var(--gaq-text)", border: "1px solid var(--gaq-line)", overflow: "auto", marginBottom: 12, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{genResultado.linha}</pre>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={async () => {
+                      try { await navigator.clipboard.writeText(genResultado.linha); setGenCopiado(true); setTimeout(() => setGenCopiado(false), 2000); } catch { alert("Não foi possível copiar automaticamente. Selecione o texto e copie manualmente."); }
+                    }}
+                      style={{ background: genCopiado ? "var(--gaq-green)" : "var(--gaq-blue)", color: "#fff", border: "none", borderRadius: 8, padding: "9px 22px", fontWeight: 700, fontSize: 12.5, cursor: "pointer", flex: 1 }}>
+                      {genCopiado ? "Copiado!" : "Copiar linha"}
+                    </button>
+                    <button onClick={() => { setGenResultado(null); setGenSenha(""); setGenNome(""); setGenArea(""); setGenAreasDestaque(""); }}
+                      style={{ background: "var(--gaq-surface)", color: "var(--gaq-text)", border: "1px solid var(--gaq-line)", borderRadius: 8, padding: "9px 18px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>
+                      Limpar
+                    </button>
+                  </div>
+                  <div style={{ marginTop: 14, fontSize: 11, color: "var(--gaq-text-3)", lineHeight: 1.55, background: "var(--gaq-bg-2)", borderRadius: 8, padding: "10px 12px", border: "1px solid var(--gaq-line)" }}>
+                    <b>Próximos passos:</b><br/>
+                    1. Abra o arquivo <code style={{ fontFamily: "var(--gaq-mono)" }}>auth.js</code> no Bloco de Notas.<br/>
+                    2. Localize o bloco <code style={{ fontFamily: "var(--gaq-mono)" }}>{genResultado.varName}</code>.<br/>
+                    3. Cole a linha (ou substitua a existente, se for senha única).<br/>
+                    4. Salve o arquivo. A senha já fica ativa no próximo login.
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="gaq-card" style={{ padding: 18, marginTop: 18 }}>
+            <div className="gaq-h3" style={{ marginBottom: 6 }}>Como funciona</div>
+            <div style={{ fontSize: 12.5, color: "var(--gaq-text-2)", lineHeight: 1.6 }}>
+              A senha que você digita acima é convertida em um <b>hash SHA-256</b> com salt ({GAQ_SALT}). Apenas o hash é gravado no <code style={{ fontFamily: "var(--gaq-mono)" }}>auth.js</code>. Quando o usuário digita a senha original, o painel calcula o hash dela e compara — se baterem, libera o acesso. Não há como recuperar a senha original a partir do hash, então guarde a senha original em local seguro antes de fechar esta tela.
+            </div>
+          </div>
+        </div>}
+
         {/* ════════════ ABA: IA INSIGHTS (Admin Master + Diretoria) ════════════ */}
         {aba === "iaInsights" && (isAdminMaster || isDiretor) && <div>
           {/* Header gradient (roxo/índigo — tema IA) */}
@@ -7292,7 +7584,7 @@ GAQ — Gerência de Aquisições`;
                 <div style={{ fontSize: 11, fontWeight: 600, opacity: .72, letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 4 }}>Inteligência Artificial · Google Gemini</div>
                 <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-.02em" }}>IA Insights</div>
                 <div style={{ fontSize: 12, opacity: .82, marginTop: 2 }}>Pergunte sobre processos, áreas, modalidades ou peça análises e recomendações com base na sua carteira.</div>
-                <div style={{ fontSize: 10, opacity: .6, marginTop: 4 }}>Modelo: gemini-2.0-flash · Contexto: {baseVis.length} processos da base acessível</div>
+                <div style={{ fontSize: 10, opacity: .6, marginTop: 4 }}>Modelo: gemini-2.5-flash · Contexto: {baseVis.length} processos da base acessível</div>
               </div>
               <div style={{ background: "rgba(255,255,255,.16)", borderRadius: 10, padding: "6px 12px", fontSize: 11, fontWeight: 700, border: "1px solid rgba(255,255,255,.28)" }}>{iaDisponivel ? "✓ IA conectada" : "✗ Chave não configurada"}</div>
             </div>
@@ -7800,10 +8092,10 @@ GAQ — Gerência de Aquisições`;
               <div style={{ fontSize: 18, fontWeight: 800, color: "var(--text)", marginBottom: 6 }}>Painel de Gestão</div>
               <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 24 }}>Acesso restrito. Digite a senha do painel de gestão.</div>
               <input type="password" placeholder="Senha do painel" value={gestaoPassInput} onChange={e => { setGestaoPassInput(e.target.value); setGestaoPassErr(false); }}
-                onKeyDown={e => { if (e.key === "Enter") { if (gestaoPassInput === (typeof GESTAO_PASS !== "undefined" ? GESTAO_PASS : "")) { setGestaoUnlocked(true); setGestaoPassInput(""); } else setGestaoPassErr(true); }}}
+                onKeyDown={async e => { if (e.key === "Enter") { const h = await gaqHashSenha(gestaoPassInput); if (typeof GESTAO_PASS !== "undefined" && h === GESTAO_PASS) { setGestaoUnlocked(true); setGestaoPassInput(""); } else setGestaoPassErr(true); }}}
                 style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: gestaoPassErr ? "2px solid #c0392b" : "1.5px solid var(--input-bd)", background: "var(--input-bg)", color: "var(--text)", fontSize: 14, marginBottom: 8, boxSizing: "border-box" }} />
               {gestaoPassErr && <div style={{ color: "#c0392b", fontSize: 12, marginBottom: 8 }}>Senha incorreta.</div>}
-              <button onClick={() => { if (gestaoPassInput === (typeof GESTAO_PASS !== "undefined" ? GESTAO_PASS : "")) { setGestaoUnlocked(true); setGestaoPassInput(""); } else setGestaoPassErr(true); }}
+              <button onClick={async () => { const h = await gaqHashSenha(gestaoPassInput); if (typeof GESTAO_PASS !== "undefined" && h === GESTAO_PASS) { setGestaoUnlocked(true); setGestaoPassInput(""); } else setGestaoPassErr(true); }}
                 style={{ background: "#2e86c1", color: "#fff", border: "none", borderRadius: 8, padding: "10px 28px", fontWeight: 700, fontSize: 14, cursor: "pointer", width: "100%" }}>Entrar</button>
             </div>
           ) : (

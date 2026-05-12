@@ -193,34 +193,37 @@ function parseBase(rows) {
     const mesAbertura = dataAbertura ? dataAbertura.getMonth() : null;
     // Fase atual e responsável pela próxima etapa pendente
     // Apenas para processos em andamento — Fracassados, Cancelados e Suspensos ficam vazios
+    // Usa ordem LEGACY para processos abertos em 2024 (SD ou RC) e ordem 2025+ para o resto.
+    const tlCols = (anoSD === 2024 || anoRC === 2024) ? TL_COLS_LEGACY : TL_COLS_2025;
     let faseAtual = "—", respFase = "—", faseAtualIdx = -1;
     if (emA) {
       // Fases CPL são ignoradas em processos não-CPL (SCONT/NCL puro)
       let ultimaFasePreenchidaIdx = -1;
-      for (let fi = TL_COLS.length - 1; fi >= 0; fi--) {
-        if (!temFluxoCPL && isCplTimelineKey(TL_COLS[fi][1])) continue;
-        if (pd(r[TL_COLS[fi][1]])) { ultimaFasePreenchidaIdx = fi; break; }
+      for (let fi = tlCols.length - 1; fi >= 0; fi--) {
+        if (!temFluxoCPL && isCplTimelineKey(tlCols[fi][1])) continue;
+        if (pd(r[tlCols[fi][1]])) { ultimaFasePreenchidaIdx = fi; break; }
       }
       if (ultimaFasePreenchidaIdx >= 0) {
         let proximaFaseVaziaIdx = -1;
-        for (let fi = ultimaFasePreenchidaIdx + 1; fi < TL_COLS.length; fi++) {
-          if (!temFluxoCPL && isCplTimelineKey(TL_COLS[fi][1])) continue;
-          if (!pd(r[TL_COLS[fi][1]])) { proximaFaseVaziaIdx = fi; break; }
+        for (let fi = ultimaFasePreenchidaIdx + 1; fi < tlCols.length; fi++) {
+          if (!temFluxoCPL && isCplTimelineKey(tlCols[fi][1])) continue;
+          if (!pd(r[tlCols[fi][1]])) { proximaFaseVaziaIdx = fi; break; }
         }
         const faseRefIdx = proximaFaseVaziaIdx >= 0 ? proximaFaseVaziaIdx : ultimaFasePreenchidaIdx;
-        faseAtual = TL_COLS[faseRefIdx][0];
-        respFase = PHASE_RESP[TL_COLS[faseRefIdx][1]] || "—";
+        faseAtual = tlCols[faseRefIdx][0];
+        respFase = PHASE_RESP[tlCols[faseRefIdx][1]] || "—";
         faseAtualIdx = faseRefIdx;
       }
     }
-    const faseKey = faseAtualIdx < 0 ? "" : TL_COLS[faseAtualIdx][1];
+    const faseKey = faseAtualIdx < 0 ? "" : tlCols[faseAtualIdx][1];
     const faseSubarea = getTimelineSubareaByKey(faseKey);
-    // Responsável atual: segue subárea em andamento; encerrados → "N/A"
+    // Responsável atual: segue subárea em andamento; encerrados → "N/A".
+    // Fallback (pré-compra/SD ou subárea indefinida): Avaliador (responsável da pré-compra), depois Comprador.
     const respAtivo = !emA ? "N/A"
       : faseSubarea === "NCL"   ? (Comprador || Avaliador || "—")
       : faseSubarea === "CPL"   ? (cplResp || "—")
       : faseSubarea === "Scont" ? (AnalistaContrato || AdvogadoResp || "—")
-      : "—";
+      : (Avaliador || Comprador || "—");
     // Aging específico desde a RC
     const diasRC = (emA && abRC) ? du(abRC, hoje) : 0;
     // Aging específico desde a abertura do SD (para processos só com SD sem RC)
@@ -651,6 +654,13 @@ var SLA_SCORE_RULES = {
   atencao: -15,
   sla_vencido: -10,
   sla_atendido: 30,
+  // Regra de Atenção (Opção C — híbrida):
+  //   Sinal forte: qualquer margem individual ≤ attentionStrongDU dispara atenção sozinha
+  //   Sinal combinado: SLA E entrega ambos ≤ attentionCombinedDU dispara junto
+  //   Projeção que estoura o SLA também dispara
+  // attentionThresholdDU é mantido para usos de UI (coloração de chips, "entrega próxima").
+  attentionStrongDU: 3,
+  attentionCombinedDU: 8,
   attentionThresholdDU: 20,
   sdWorstCaseDU: PRAZO_LICITACAO,
 };
@@ -942,11 +952,17 @@ function calcSLAClassification(proc, phaseIntervals, options) {
 
   options = options || {};
   const attentionThresholdDU = options.attentionThresholdDU || SLA_SCORE_RULES.attentionThresholdDU;
+  const strongThresholdDU = options.attentionStrongDU || SLA_SCORE_RULES.attentionStrongDU;
+  const combinedThresholdDU = options.attentionCombinedDU || SLA_SCORE_RULES.attentionCombinedDU;
   const hasRC = !!(proc.NumRC && String(proc.NumRC).trim() !== "");
   const slaPrazo = hasRC ? (proc.prazoGeral || getPrazoGeral(nrm(proc.Modalidade || ""))) : PRAZO_SD;
-  const diasConsumidos = hasRC ? (proc.diasTotais || 0) : (proc.diasSDAberto || proc.diasSD || 0);
+  // SLA da fase SD: mede o intervalo abertura → encerramento (congela quando encerra).
+  // Se SD ainda aberto, usa abertura → hoje. Se encerrou, usa diasAgingSD (último histórico).
+  // O tempo parado pós-encerramento sem RC NÃO entra no SLA (é indicador separado).
+  const diasConsumidosSD = proc.encSD ? (proc.diasAgingSD || 0) : (proc.diasSDAberto || 0);
+  const diasConsumidos = hasRC ? (proc.diasTotais || 0) : diasConsumidosSD;
   const pctSLA = slaPrazo > 0 ? (diasConsumidos / slaPrazo) : 0;
-  const slaVencido = hasRC ? !!proc.atrasoGeral : !!proc.atrasoSD;
+  const slaVencido = hasRC ? !!proc.atrasoGeral : (diasConsumidosSD > PRAZO_SD);
   const projection = estimateRemainingBusinessDays(proc, phaseIntervals);
   const diasRestantesProjetados = projection ? projection.total : (hasRC ? Math.max(0, slaPrazo - diasConsumidos) : SLA_SCORE_RULES.sdWorstCaseDU);
   const temEntrega = !!proc.dataEntrega;
@@ -956,35 +972,46 @@ function calcSLAClassification(proc, phaseIntervals, options) {
   const projecaoForaCronograma = margemEntregaDU != null && margemEntregaDU < 0;
   const margemSLADU = hasRC ? (slaPrazo - (diasConsumidos + diasRestantesProjetados)) : null;
   const projecaoEstouraSla = !hasRC ? false : (margemSLADU != null && margemSLADU < 0);
-  const janelaComprometida = !hasRC ? false : (margemEntregaDU != null && margemEntregaDU <= attentionThresholdDU);
-  const atencaoPrazo = !hasRC ? false : (margemSLADU != null && margemSLADU <= attentionThresholdDU);
-  const atencaoEntrega = !hasRC ? false : (margemEntregaDU != null && margemEntregaDU <= attentionThresholdDU);
+  // Flags individuais usam o threshold combinado (8 d.u.) — usadas para sub-divisão em filtros externos.
+  const janelaComprometida = !hasRC ? false : (margemEntregaDU != null && margemEntregaDU <= combinedThresholdDU);
+  const atencaoPrazo = !hasRC ? false : (margemSLADU != null && margemSLADU <= combinedThresholdDU);
+  const atencaoEntrega = !hasRC ? false : (margemEntregaDU != null && margemEntregaDU <= combinedThresholdDU);
+  // entregaProxima mantém threshold maior (20 d.u.) — usado só em chip de UI, não na classificação.
   const entregaProxima = !hasRC ? false : (diasEntregaUteis != null && diasEntregaUteis >= 0 && diasEntregaUteis <= attentionThresholdDU);
+  // Sinais "fortes": uma margem individual ≤ 3 d.u. dispara atenção sozinha.
+  const atencaoSlaForte = !hasRC ? false : (margemSLADU != null && margemSLADU <= strongThresholdDU);
+  const atencaoEntregaForte = !hasRC ? false : (margemEntregaDU != null && margemEntregaDU <= strongThresholdDU);
+  const atencaoForte = atencaoSlaForte || atencaoEntregaForte || projecaoEstouraSla;
+  // Sinal "combinado": SLA E entrega ambos pressionados (≤ 8 d.u.) dispara junto.
+  const atencaoCombinada = atencaoPrazo && atencaoEntrega;
 
   let bucket = "no_prazo";
   let detail = temEntrega ? "Dentro do SLA e do cronograma de entrega." : "Dentro do SLA atual.";
 
-  if (slaVencido && (entregaVencida || projecaoForaCronograma)) {
+  if (slaVencido && hasRC && (entregaVencida || projecaoForaCronograma)) {
     bucket = "critico";
     detail = entregaVencida
-      ? "SLA vencido e entrega ja vencida."
-      : "SLA vencido e projecao de conclusao fora do cronograma de entrega.";
+      ? "SLA vencido e entrega já vencida."
+      : "SLA vencido e projeção de conclusão fora do cronograma de entrega.";
   } else if (slaVencido) {
     bucket = "sla_vencido";
     detail = hasRC
       ? "Fora do SLA da modalidade, mas ainda dentro do cronograma de entrega."
-      : "Pré-compra acima de 10 d.u.; entrega avaliada no pior cenario de 90 d.u.";
+      : (proc.encSD
+          ? "Pré-compra encerrada fora do prazo de 10 d.u. — aguardando abertura da RC."
+          : "Pré-compra aberta há mais de 10 d.u. sem encerramento.");
   } else if (!hasRC) {
     bucket = "no_prazo";
-    detail = "Pré-compra dentro do prazo de 10 d.u.";
-  } else if (atencaoPrazo || atencaoEntrega || projecaoEstouraSla) {
+    detail = proc.encSD
+      ? "Pré-compra encerrada dentro do prazo de 10 d.u. — aguardando abertura da RC."
+      : "Pré-compra dentro do prazo de 10 d.u.";
+  } else if (atencaoForte || atencaoCombinada) {
     bucket = "atencao";
-    if (projecaoEstouraSla && atencaoEntrega) detail = `Margem curta para SLA e entrega (ate ${attentionThresholdDU} d.u.).`;
-    else if (projecaoEstouraSla) detail = "Ritmo atual projeta ruptura do SLA antes da conclusao.";
-    else if (margemEntregaDU != null && margemEntregaDU < 0) detail = "Entrega pressionada: projecao de conclusao acima da data prevista.";
-    else if (janelaComprometida && atencaoPrazo) detail = `Margem curta para SLA e entrega (ate ${attentionThresholdDU} d.u.).`;
-    else if (janelaComprometida) detail = `Margem de entrega em ate ${attentionThresholdDU} d.u.`;
-    else detail = `Margem de SLA em ate ${attentionThresholdDU} d.u.`;
+    if (projecaoEstouraSla)              detail = "Ritmo atual projeta ruptura do SLA antes da conclusão.";
+    else if (atencaoSlaForte && atencaoEntregaForte) detail = `Margem crítica em SLA e entrega (≤ ${strongThresholdDU} d.u.).`;
+    else if (atencaoSlaForte)            detail = `Margem de SLA muito curta (≤ ${strongThresholdDU} d.u.).`;
+    else if (atencaoEntregaForte)        detail = `Margem de entrega muito curta (≤ ${strongThresholdDU} d.u.).`;
+    else /* atencaoCombinada */          detail = `Pressão dupla: SLA e entrega ambos ≤ ${combinedThresholdDU} d.u. de margem.`;
   }
 
   const visual = bucket === "critico"
@@ -1010,6 +1037,10 @@ function calcSLAClassification(proc, phaseIntervals, options) {
     janelaComprometida,
     atencaoPrazo,
     atencaoEntrega,
+    atencaoSlaForte,
+    atencaoEntregaForte,
+    atencaoForte,
+    atencaoCombinada,
     entregaProxima,
     pctSLA,
     pctSLALabel: Math.round(pctSLA * 100),
@@ -1022,6 +1053,8 @@ function calcSLAClassification(proc, phaseIntervals, options) {
     margemEntregaDU,
     margemSLADU,
     attentionThresholdDU,
+    attentionStrongDU: strongThresholdDU,
+    attentionCombinedDU: combinedThresholdDU,
     hasRC,
     sdWorstCaseDU: !hasRC ? SLA_SCORE_RULES.sdWorstCaseDU : null,
     projection,

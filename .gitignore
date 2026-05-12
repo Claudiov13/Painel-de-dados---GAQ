@@ -9,6 +9,8 @@ logs/
 dados.js
 tags.js
 apikey.js
+auth.backup.js
+_test_sha256.js
 **/dados.json
 **/tags.json
 
