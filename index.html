@@ -20,16 +20,18 @@
   <script src="https://cdn.jsdelivr.net/npm/recharts/umd/Recharts.min.js"></script>
 
   <!-- ══════════════════════════════════════════════════════════
-       AUTO-LOAD: dados.js e tags.js (funciona em file:// e SharePoint)
-       Coloque dados.js e tags.js NA MESMA PASTA deste HTML.
-       Formato dados.js:  window.__PAINEL_DADOS__ = [ {...}, {...}, ... ];
-       Formato tags.js:   window.__PAINEL_TAGS__ = { tags: {...}, tagList: [...] };
+       AUTO-LOAD: dados.js, tags.js e chamados_servicedesk.js (funciona em file:// e SharePoint)
+       Coloque os arquivos NA MESMA PASTA deste HTML.
+       Formato dados.js:                 window.__PAINEL_DADOS__ = [ {...}, {...}, ... ];
+       Formato tags.js:                  window.__PAINEL_TAGS__ = { tags: {...}, tagList: [...] };
+       Formato chamados_servicedesk.js:  window.__SERVICE_DESK__ = { "88253579": {...} };
        ══════════════════════════════════════════════════════════ -->
   <script>
     (function(){
       var ts = Date.now();
       document.write('<scr'+'ipt src="./dados.js?ts='+ts+'"><\/scr'+'ipt>');
       document.write('<scr'+'ipt src="./tags.js?ts='+ts+'"><\/scr'+'ipt>');
+      document.write('<scr'+'ipt charset="UTF-8" src="./chamados_servicedesk.js?ts='+ts+'"><\/scr'+'ipt>');
     })();
   </script>
   <script src="./auth.js"></script>
@@ -738,23 +740,305 @@ SESC Pantanal – Equipe de Compras`;
   );
 };
 
-const TimelineModal = ({ proc, onClose, onOpenTags, onUpdate, phaseIntervals, onToggleWatch, watchVersion, hidePredictions }) => {
+function getServiceDeskRecord(ticket, serviceDeskData) {
+  const raw = String(ticket || "").trim();
+  if (!raw || !serviceDeskData) return null;
+  const compact = raw.replace(/\D/g, "");
+  return serviceDeskData[raw] || serviceDeskData[compact] || null;
+}
+
+function fixServiceDeskText(value) {
+  if (value == null) return "";
+  const s = String(value);
+  if (!/[\u00c3\u00c2\u00e2]/.test(s)) return s;
+  try {
+    return decodeURIComponent(escape(s));
+  } catch (_) {
+    const map = {
+      "\u00c3\u00a7": "\u00e7", "\u00c3\u2021": "\u00c7",
+      "\u00c3\u00a3": "\u00e3", "\u00c3\u00b5": "\u00f5",
+      "\u00c3\u00a1": "\u00e1", "\u00c3\u00a9": "\u00e9", "\u00c3\u00ad": "\u00ed", "\u00c3\u00b3": "\u00f3", "\u00c3\u00ba": "\u00fa",
+      "\u00c3\u00a0": "\u00e0", "\u00c3\u00aa": "\u00ea", "\u00c3\u00b4": "\u00f4", "\u00c3\u0160": "\u00ca",
+      "\u00c3\u0081": "\u00c1", "\u00c3\u2030": "\u00c9", "\u00c3\u008d": "\u00cd", "\u00c3\u201c": "\u00d3", "\u00c3\u0161": "\u00da",
+      "\u00e2\u20ac\u201c": "\u2013", "\u00e2\u20ac\u201d": "\u2014", "\u00e2\u20ac\u00a2": "\u2022",
+      "\u00c2\u00ba": "\u00ba", "\u00c2\u00aa": "\u00aa"
+    };
+    return Object.keys(map).reduce((acc, key) => acc.split(key).join(map[key]), s);
+  }
+}
+
+function cleanServiceDeskObject(obj) {
+  const out = {};
+  Object.entries(obj || {}).forEach(([key, value]) => {
+    out[key] = typeof value === "string" ? fixServiceDeskText(value) : value;
+  });
+  return out;
+}
+
+function cleanServiceDeskParty(value) {
+  const text = fixServiceDeskText(value || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/["']/g, " ");
+  const parts = text.split(/\n+/)
+    .map(part => part.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const unique = [];
+  parts.forEach(part => {
+    if (!unique.some(item => nrm(item) === nrm(part))) unique.push(part);
+  });
+  return unique[0] || "";
+}
+
+function formatServiceDeskType(tipo) {
+  const t = nrm(fixServiceDeskText(tipo || ""));
+  if (t.includes("nota")) return "Nota interna";
+  if (t.includes("email") || t.includes("e-mail")) return "E-mail externo";
+  if (t.includes("cliente")) return "Cliente · Chamado web";
+  if (t.includes("atendente")) return "Atendimento";
+  return fixServiceDeskText(tipo || "Interação");
+}
+
+function formatServiceDeskSubject(assunto) {
+  const s = fixServiceDeskText(assunto || "").trim();
+  if (nrm(s) === "atualizacao de tecnico!") return "Atualização de técnico";
+  return s;
+}
+
+function summarizeServiceDesk(ticket, record) {
+  if (!record) return null;
+  const info = cleanServiceDeskObject(record.informacoes_do_chamado);
+  const cliente = cleanServiceDeskObject(record.informacoes_do_cliente);
+  const interacoes = Array.isArray(record.interacoes) ? record.interacoes.map(cleanServiceDeskObject) : [];
+  const last = interacoes.length ? interacoes[interacoes.length - 1] : {};
+  const estado = info.estado || "Sem status";
+  const estadoN = nrm(estado);
+  const lastTipoN = nrm(last.tipo || "");
+  const lastFromCliente = lastTipoN.includes("cliente");
+  const aguardandoArea = estadoN.includes("usuario") || estadoN.includes("cliente") || estadoN.includes("pendente inf") || (!lastFromCliente && lastTipoN.includes("atendente") && !!last.para);
+  const clienteNome = cleanServiceDeskParty([cliente.nome, cliente.sobrenome].filter(Boolean).join(" "));
+  const lastPara = cleanServiceDeskParty(last.para);
+  const tecnicoNome = cleanServiceDeskParty(info.tecnico);
+  const filaNome = cleanServiceDeskParty(info.fila);
+  const comQuem = aguardandoArea
+    ? (lastPara || clienteNome || "Área requisitante")
+    : (tecnicoNome || filaNome || "GAQ / Service Desk");
+  const acao = aguardandoArea
+    ? "A área requisitante precisa responder ou ajustar a pendência solicitada."
+    : lastFromCliente
+      ? "GAQ deve analisar o retorno da área e registrar o próximo encaminhamento."
+      : "GAQ / Service Desk deve dar continuidade ao chamado.";
+  const ultimaPendencia = (last.mensagem || last.assunto || info.servico || "").toString().replace(/\s+/g, " ").trim();
+  const _parseSDDate = s => { if (!s) return null; const m = String(s).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(+m[3], +m[2]-1, +m[1]) : null; };
+  const ultimaInteracaoDate = _parseSDDate(last.criado);
+  const _hojeSD = new Date(); _hojeSD.setHours(0,0,0,0);
+  const diasDesdeUltimaInteracao = ultimaInteracaoDate ? du(ultimaInteracaoDate, _hojeSD) : null;
+  return {
+    numero: String(ticket || "").trim(),
+    info,
+    cliente,
+    interacoes,
+    last,
+    estado,
+    comQuem,
+    acao,
+    ultimaPendencia,
+    ultimaInteracaoDate,
+    diasDesdeUltimaInteracao,
+  };
+}
+
+function getServiceDeskAlertSummary(proc, serviceDeskData) {
+  const summary = summarizeServiceDesk(proc?.TicketSD, getServiceDeskRecord(proc?.TicketSD, serviceDeskData));
+  if (!summary) return null;
+  const semRC = !String(proc?.NumRC || "").trim();
+  const encerrado = nrm(summary.estado).includes("finalizado") || nrm(summary.estado).includes("fechado") || nrm(summary.last?.assunto || "").includes("fechar");
+  if (!semRC || !encerrado) return summary;
+  const clienteNome = cleanServiceDeskParty([summary.cliente.nome, summary.cliente.sobrenome].filter(Boolean).join(" "));
+  return {
+    ...summary,
+    comQuem: clienteNome ? `Área requisitante (${clienteNome})` : "Área requisitante",
+    acao: "Abrir a RC com os documentos validados no Service Desk.",
+  };
+}
+
+function enrichWithSDHistory(proc, sdData) {
+  if (!proc.TicketSD || !sdData) return proc;
+  const record = getServiceDeskRecord(proc.TicketSD, sdData);
+  if (!record || !Array.isArray(record.interacoes) || record.interacoes.length === 0) return proc;
+
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const interacoes = record.interacoes.map(cleanServiceDeskObject);
+
+  const parseSDDate = s => {
+    if (!s) return null;
+    const m = String(s).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    return m ? new Date(+m[3], +m[2]-1, +m[1]) : null;
+  };
+
+  const aberturaHist      = parseSDDate(interacoes[0]?.criado);
+  const distribuicaoHist  = parseSDDate(interacoes[1]?.criado);
+  const primRespostaHist  = parseSDDate(interacoes[2]?.criado);
+  const encInteracao      = [...interacoes].reverse().find(i => /fechar/i.test(i.assunto || ""));
+  const encHist           = encInteracao ? parseSDDate(encInteracao.criado) : null;
+
+  if (!aberturaHist && !distribuicaoHist && !encHist && !primRespostaHist) return proc;
+
+  const overrides = {};
+  const histFields = {};
+
+  if (aberturaHist) {
+    overrides.aberturaSD = aberturaHist;
+    overrides["Data da abertura do SD"] = aberturaHist;
+    histFields["Data da abertura do SD"] = true;
+  }
+  if (distribuicaoHist) {
+    overrides["Data da distribuição do SD"] = distribuicaoHist;
+    histFields["Data da distribuição do SD"] = true;
+  }
+  if (primRespostaHist) {
+    overrides[COL_SD_PRIM_RESPOSTA] = primRespostaHist;
+    histFields[COL_SD_PRIM_RESPOSTA] = true;
+  }
+  if (encHist) {
+    overrides.encSD = encHist;
+    overrides["Data do encerramento"] = encHist;
+    histFields["Data do encerramento"] = true;
+  }
+
+  const newAberturaSD = overrides.aberturaSD || proc.aberturaSD;
+  const newEncSD      = overrides.encSD       || proc.encSD;
+  const newDiasSDAberto  = (proc.emA && newAberturaSD && !newEncSD) ? du(newAberturaSD, hoje) : 0;
+  const newAtrasoSD      = newDiasSDAberto > PRAZO_SD;
+  const newDiasAgingSD   = (newAberturaSD && newEncSD) ? du(newAberturaSD, newEncSD) : 0;
+  const newDiasDesdeEncSD = (newEncSD && !proc.aberturaRC) ? du(newEncSD, hoje) : 0;
+
+  return {
+    ...proc,
+    ...overrides,
+    diasSDAberto: newDiasSDAberto,
+    atrasoSD: newAtrasoSD,
+    diasAgingSD: newDiasAgingSD,
+    diasDesdeEncSD: newDiasDesdeEncSD,
+    _sdHistoricoDates: histFields,
+  };
+}
+
+function gerarScriptExtratorOTRS(ticketIds, modo) {
+  const tplEl = document.getElementById(modo === "diurno" ? "otrs-tpl-diurno" : "otrs-tpl-rapido");
+  if (!tplEl) return "/* template não encontrado */";
+  const lista = JSON.stringify(ticketIds, null, 4);
+  return tplEl.textContent.replace("{{LISTA_CHAMADOS}}", lista);
+}
+
+const ServiceDeskAlertStrip = ({ summary }) => {
+  if (!summary) return null;
+  const { comQuem, acao, estado, diasDesdeUltimaInteracao, ultimaInteracaoDate } = summary;
+  const diasColor = diasDesdeUltimaInteracao == null ? "var(--gaq-text-3)"
+    : diasDesdeUltimaInteracao > 10 ? "#dc2626"
+    : diasDesdeUltimaInteracao > 5 ? "#c2410c"
+    : "var(--gaq-text-2)";
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 0, alignItems: "stretch", margin: "8px 0 7px", border: "1px solid var(--gaq-line)", borderRadius: 8, background: "var(--gaq-bg-2)", overflow: "hidden" }}>
+      <div style={{ flex: "0 1 210px", minWidth: 150, padding: "7px 11px", borderRight: "1px solid var(--gaq-line)" }}>
+        <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--gaq-text-3)", marginBottom: 2 }}>Com quem está</div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--gaq-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{comQuem}</div>
+      </div>
+      <div style={{ flex: "1 1 260px", minWidth: 200, padding: "7px 11px", borderRight: diasDesdeUltimaInteracao != null ? "1px solid var(--gaq-line)" : "none" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 2 }}>
+          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--gaq-text-3)" }}>Ação necessária</div>
+          <span style={{ fontSize: 9, fontWeight: 600, color: "var(--gaq-text-3)", background: "var(--gaq-surface)", borderRadius: 999, padding: "1px 7px", border: "1px solid var(--gaq-line)", whiteSpace: "nowrap" }}>{estado}</span>
+        </div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--gaq-text-2)", lineHeight: 1.35 }}>{acao}</div>
+      </div>
+      {diasDesdeUltimaInteracao != null && (
+        <div style={{ flex: "0 0 auto", padding: "7px 13px", minWidth: 110, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--gaq-text-3)", marginBottom: 2 }}>Últ. inter. SD</div>
+          <div style={{ fontSize: 17, fontWeight: 800, color: diasColor, lineHeight: 1 }}>{diasDesdeUltimaInteracao}</div>
+          <div style={{ fontSize: 9, color: "var(--gaq-text-3)", marginTop: 1 }}>d.u. atrás</div>
+          {ultimaInteracaoDate && <div style={{ fontSize: 9, color: "var(--gaq-text-3)", marginTop: 2 }}>{ultimaInteracaoDate.toLocaleDateString("pt-BR")}</div>}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const ServiceDeskHistoryModal = ({ ticket, record, onClose }) => {
+  const summary = summarizeServiceDesk(ticket, record);
+  if (!summary) return null;
+  const { info, cliente, interacoes, last, estado, comQuem, acao, ultimaPendencia } = summary;
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.58)", zIndex: 2200, display: "flex", alignItems: "center", justifyContent: "center", padding: 18, fontFamily: "var(--gaq-font)", WebkitFontSmoothing: "antialiased", textRendering: "optimizeLegibility" }} onClick={onClose}>
+      <div style={{ width: "min(820px,96vw)", maxHeight: "90vh", background: "var(--gaq-surface)", borderRadius: 14, boxShadow: "var(--gaq-shadow-2)", border: "1px solid var(--gaq-line)", overflow: "hidden", display: "flex", flexDirection: "column" }} onClick={e => e.stopPropagation()}>
+        <div style={{ padding: "18px 22px", background: "linear-gradient(135deg,#0f3d5e,#1a5276)", color: "#fff", display: "flex", justifyContent: "space-between", gap: 14 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", opacity: .75, letterSpacing: ".04em", marginBottom: 4 }}>Histórico Service Desk</div>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>{ticket}</div>
+            <div style={{ fontSize: 12, opacity: .86, marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 620 }}>{info.titulo || last.assunto || "Chamado de pré-compra"}</div>
+          </div>
+          <button type="button" onClick={onClose} style={{ width: 32, height: 32, borderRadius: 8, border: "1px solid rgba(255,255,255,.25)", background: "rgba(255,255,255,.12)", color: "#fff", cursor: "pointer", fontSize: 18 }}>×</button>
+        </div>
+        <div style={{ padding: 18, overflow: "auto" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10, marginBottom: 14 }}>
+            {[
+              ["Status", estado],
+              ["Com quem está", comQuem],
+              ["Técnico", info.tecnico || "—"],
+              ["Fila", info.fila || "—"],
+              ["Cliente", [cliente.nome, cliente.sobrenome].filter(Boolean).join(" ") || "—"],
+              ["Criado", info.criado || "—"],
+            ].map(([label, value]) => (
+              <div key={label} style={{ background: "var(--gaq-bg-2)", border: "1px solid var(--gaq-line)", borderRadius: 8, padding: "10px 12px" }}>
+                <div className="gaq-eyebrow" style={{ fontSize: 9, marginBottom: 3 }}>{label}</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--gaq-text)" }}>{value}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", color: "#9a3412", borderRadius: 10, padding: "11px 14px", marginBottom: 16 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Ação pendente</div>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{acao}</div>
+            {ultimaPendencia && <div style={{ fontSize: 11, marginTop: 6, lineHeight: 1.5 }}><b>Última interação:</b> {ultimaPendencia.slice(0, 320)}{ultimaPendencia.length > 320 ? "..." : ""}</div>}
+          </div>
+          <div className="gaq-eyebrow" style={{ marginBottom: 10 }}>Interações ({interacoes.length})</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {interacoes.map((it, idx) => (
+              <div key={idx} style={{ border: "1px solid var(--gaq-line)", borderRadius: 10, padding: "11px 13px", background: idx === interacoes.length - 1 ? "rgba(46,134,193,.08)" : "var(--gaq-surface)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 5 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--gaq-text)" }}>{it.numero ? `#${it.numero} · ` : ""}{formatServiceDeskType(it.tipo)}</div>
+                  <div style={{ fontSize: 10, color: "var(--gaq-text-3)" }}>{it.criado || "—"}</div>
+                </div>
+                <div style={{ fontSize: 10, color: "var(--gaq-text-3)", marginBottom: 7 }}>
+                  {it.de || "—"}{it.para ? ` → ${it.para}` : ""}{it.assunto ? ` · ${formatServiceDeskSubject(it.assunto)}` : ""}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--gaq-text-2)", lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{it.mensagem || "—"}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const TimelineModal = ({ proc, onClose, onOpenTags, onUpdate, phaseIntervals, onToggleWatch, watchVersion, hidePredictions, serviceDeskData }) => {
   const [showHist, setShowHist] = useState(false);
+  const [showServiceDeskHist, setShowServiceDeskHist] = useState(false);
   const [showPredictions, setShowPredictions] = useState(false);
   const [showObjeto, setShowObjeto] = useState(false);
   const [showCronMenu, setShowCronMenu] = useState(false);
   const [showResponsaveis, setShowResponsaveis] = useState(false);
   const tags = TagsManager.getForProcess(proc.ProcessKey, proc.TicketSD);
   const isWatched = WatchlistManager.isWatched(proc.ProcessKey);
-  // Ordem das fases varia por proc: 2024 → LEGACY, demais → 2025+ (com nova Conclusão Scont)
-  const tlColsProc = getTLColsForProc(proc);
-  const ents = tlColsProc.map(([label, key], idx) => ({ label, key, date: pd(proc[key]), isCPL: isCplTimelineKey(key), idx }));
+  // Ordena fases: a Indicação Analista é volátil e fica em posição cronológica por proc.
+  // As demais (incl. Recebimento DJ) seguem a ordem fixa de TL_COLS.
+  const ents = getOrderedTimelineEntries(proc);
   const _tlSla = calcSLAClassification(proc, phaseIntervals);
   const _tlBk = _tlSla ? SLA_BUCKETS[_tlSla.bucket] : null;
   const entregaDate = pd(proc.dataEntrega);
   const entregaDU = entregaDate ? businessDaysFromTodaySigned(entregaDate) : null;
   const entregaColor = entregaDU == null ? "#2e86c1" : entregaDU < 0 ? "#c0392b" : entregaDU <= 15 ? "#e67e22" : "#27ae60";
   const entregaLabel = entregaDU == null ? "" : entregaDU < 0 ? `${Math.abs(entregaDU)} d.u. vencida` : entregaDU === 0 ? "vence hoje" : `${entregaDU} d.u. restantes`;
+  const serviceDeskRecord = getServiceDeskRecord(proc.TicketSD, serviceDeskData);
+  const serviceDeskSummary = summarizeServiceDesk(proc.TicketSD, serviceDeskRecord);
   useEffect(() => { setShowPredictions(false); }, [proc?.ProcessKey]);
 
   // ── Calcular previsões para datas não preenchidas ──
@@ -764,26 +1048,29 @@ const TimelineModal = ({ proc, onClose, onOpenTags, onUpdate, phaseIntervals, on
     const modData = phaseIntervals.byMod[mod] || {};
     const globalData = phaseIntervals.global || {};
     const preds = {};
-    // Modalidades sem CPL param no Envio Pedido/Suite (idx 9 — mesmo em LEGACY e 2025)
-    const maxPredIdx = proc.isNonCPL ? IDX_ENVIO_PEDIDO : tlColsProc.length - 1;
+    // Modalidades sem CPL param no Envio Pedido/Suite (idx 9)
+    const maxPredIdx = proc.isNonCPL ? IDX_ENVIO_PEDIDO : TL_COLS.length - 1;
     // Encontrar última data preenchida até o limite da modalidade
     let lastFilledIdx = -1, lastFilledDate = null;
-    ents.forEach((en, i) => { if (en.date && i <= maxPredIdx) { lastFilledIdx = i; lastFilledDate = en.date; } });
+    for (let i = 0; i < TL_COLS.length && i <= maxPredIdx; i++) {
+      const d = pd(proc[TL_COLS[i][1]]);
+      if (d) { lastFilledIdx = i; lastFilledDate = d; }
+    }
     if (lastFilledIdx < 0 || !lastFilledDate) return {};
     // Projetar para frente a partir da última data preenchida
     let cursor = lastFilledDate;
     for (let i = lastFilledIdx; i < maxPredIdx; i++) {
-      const [, keyA] = tlColsProc[i];
-      const [, keyB] = tlColsProc[i + 1];
+      const [, keyA] = TL_COLS[i];
+      const [, keyB] = TL_COLS[i + 1];
       const pair = keyA + "→" + keyB;
       const data = modData[pair] || globalData[pair];
       if (!data || !data.avg) continue;
-      const nextEnt = ents[i + 1];
-      if (nextEnt && nextEnt.date) { cursor = nextEnt.date; continue; } // já preenchida
+      const nextDate = pd(proc[keyB]);
+      if (nextDate) { cursor = nextDate; continue; } // já preenchida
       // Projetar: cursor + avg dias úteis (aproximar como dias corridos * 1.4)
       const projDate = new Date(cursor);
       projDate.setDate(projDate.getDate() + Math.round(data.avg * 1.4));
-      preds[tlColsProc[i + 1][1]] = { date: projDate, avg: data.avg, n: data.n, source: modData[pair] ? "modalidade" : "global" };
+      preds[keyB] = { date: projDate, avg: data.avg, n: data.n, source: modData[pair] ? "modalidade" : "global" };
       cursor = projDate;
     }
     return preds;
@@ -869,9 +1156,9 @@ const TimelineModal = ({ proc, onClose, onOpenTags, onUpdate, phaseIntervals, on
             {tags.length > 0 && <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 8 }}>{tags.map(t => <TagBadge key={t} tag={t} small onDark />)}</div>}
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, flexShrink: 0 }}>
-            <button onClick={onClose} title="Fechar"
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClose && onClose(); }} title="Fechar"
               style={{ background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.20)", color: "#fff", fontSize: 18, lineHeight: 1, cursor: "pointer", width: 30, height: 30, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
-            <button onClick={() => onToggleWatch && onToggleWatch(proc)} title={isWatched ? "Remover do acompanhamento" : "Acompanhar processo"}
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleWatch && onToggleWatch(proc); }} title={isWatched ? "Remover do acompanhamento" : "Acompanhar processo"}
               style={{ background: isWatched ? "rgba(243,156,18,0.95)" : "rgba(255,255,255,0.10)", border: isWatched ? "1px solid #f39c12" : "1px solid rgba(255,255,255,0.22)", borderRadius: 999, padding: "5px 12px", cursor: "pointer", fontSize: 11, color: "#fff", fontWeight: 600, transition: "all .2s", whiteSpace: "nowrap" }}>
               {isWatched ? "👁 Acompanhando" : "👁 Acompanhar"}
             </button>
@@ -882,7 +1169,7 @@ const TimelineModal = ({ proc, onClose, onOpenTags, onUpdate, phaseIntervals, on
         <div style={{ overflow: "auto", padding: "18px 24px", flex: 1, background: "var(--gaq-bg)" }}>
           {/* Barra de ações */}
           <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-            <button onClick={() => setShowHist(true)} className="gaq-btn"
+            <button key="tl-hist" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowHist(true); }} className="gaq-btn"
               style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600 }}>
               <Icon name="clock" size={13}/> Histórico
               {proc.Historico && <span style={{ background: "#2e86c1", color: "#fff", borderRadius: 999, padding: "1px 7px", fontSize: 9, fontWeight: 700 }}>NCL</span>}
@@ -890,37 +1177,37 @@ const TimelineModal = ({ proc, onClose, onOpenTags, onUpdate, phaseIntervals, on
               {proc.HistoricoScont && <span style={{ background: "#16a085", color: "#fff", borderRadius: 999, padding: "1px 7px", fontSize: 9, fontWeight: 700 }}>Scont</span>}
               {!proc.Historico && !proc.HistoricoCPL && !proc.HistoricoScont && <span style={{ opacity: .55, fontWeight: 400, fontSize: 11 }}>(sem)</span>}
             </button>
-            <button onClick={() => onOpenTags(proc)} className="gaq-btn"
+            <button key="tl-tags" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onOpenTags(proc); }} className="gaq-btn"
               style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600 }}>
               <Icon name="tag" size={13}/> Tags ({tags.length})
             </button>
-            <button onClick={() => setShowObjeto(s => !s)}
+            <button key="tl-obj" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowObjeto(s => !s); }}
               className={showObjeto ? "gaq-btn is-primary" : "gaq-btn"}
               style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600 }}>
               <Icon name="doc" size={13}/> Objeto {showObjeto ? "▲" : "▼"}
             </button>
             {!hidePredictions && proc.emA && Object.keys(predictions).length > 0 && (
-              <button onClick={() => setShowPredictions(p => !p)}
+              <button key="tl-pred" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowPredictions(p => !p); }}
                 className="gaq-btn"
                 style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, background: showPredictions ? "#e67e22" : "var(--gaq-surface)", color: showPredictions ? "#fff" : "var(--gaq-text)", borderColor: showPredictions ? "#e67e22" : "var(--gaq-line)" }}>
                 <Icon name="spark" size={13}/> Previsões {showPredictions ? "ON" : "OFF"}
               </button>
             )}
-            <div style={{ position: "relative" }}>
-              <button onClick={() => setShowCronMenu(m => !m)} className="gaq-btn is-primary"
+            <div key="tl-cron-wrap" style={{ position: "relative" }}>
+              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowCronMenu(m => !m); }} className="gaq-btn is-primary"
                 style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600 }}>
                 <Icon name="calendar" size={13}/> Cronograma {showCronMenu ? "▲" : "▼"}
               </button>
               {showCronMenu && (
                 <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, background: "var(--gaq-surface)", borderRadius: 10, boxShadow: "var(--gaq-shadow-2)", zIndex: 50, minWidth: 200, overflow: "hidden", border: "1px solid var(--gaq-line)" }}>
-                  <button onClick={() => { exportCronogramaExcel(proc, phaseIntervals); setShowCronMenu(false); }}
+                  <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); exportCronogramaExcel(proc, phaseIntervals); setShowCronMenu(false); }}
                     style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", background: "none", border: "none", borderBottom: "1px solid var(--gaq-line)", color: "var(--gaq-text)", cursor: "pointer", fontSize: 13, textAlign: "left" }}
                     onMouseEnter={e => e.currentTarget.style.background = "var(--gaq-bg-2)"}
                     onMouseLeave={e => e.currentTarget.style.background = "none"}>
                     <Icon name="download" size={14}/>
                     <div><div style={{ fontWeight: 700 }}>Exportar Excel</div><div style={{ fontSize: 10, color: "var(--gaq-text-3)" }}>Cronograma + dados do processo</div></div>
                   </button>
-                  <button onClick={() => { exportCronogramaPDF(proc, phaseIntervals); setShowCronMenu(false); }}
+                  <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); exportCronogramaPDF(proc, phaseIntervals); setShowCronMenu(false); }}
                     style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", background: "none", border: "none", color: "var(--gaq-text)", cursor: "pointer", fontSize: 13, textAlign: "left" }}
                     onMouseEnter={e => e.currentTarget.style.background = "var(--gaq-bg-2)"}
                     onMouseLeave={e => e.currentTarget.style.background = "none"}>
@@ -961,6 +1248,35 @@ const TimelineModal = ({ proc, onClose, onOpenTags, onUpdate, phaseIntervals, on
           {/* Linha do tempo das fases */}
           <div className="gaq-card" style={{ padding: "16px 18px 8px" }}>
             <div className="gaq-eyebrow" style={{ marginBottom: 12 }}>Etapas do processo</div>
+            {serviceDeskSummary && (
+              <div onClick={() => setShowServiceDeskHist(true)}
+                style={{ display: "flex", minHeight: 68, cursor: "pointer" }}
+                title="Abrir histórico do Service Desk">
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 28, flexShrink: 0 }}>
+                  <div style={{ width: 14, height: 14, borderRadius: "50%", marginTop: 4, flexShrink: 0, background: "#f97316", border: "2px solid #f97316", boxShadow: "0 0 0 3px #f9731622" }} />
+                  <div style={{ width: 2, flex: 1, minHeight: 22, background: "var(--gaq-line)" }} />
+                </div>
+                <div style={{ flex: 1, paddingBottom: 14, paddingLeft: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: "#ea580c", textTransform: "uppercase", letterSpacing: ".03em", marginBottom: 3, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span>Service Desk · Pré-compra {proc.TicketSD}</span>
+                        <span style={{ fontSize: 9, fontWeight: 600, color: "#fff", background: "#f97316", borderRadius: 999, padding: "1px 7px", textTransform: "none", letterSpacing: 0 }}>{serviceDeskSummary.estado}</span>
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--gaq-text)", marginBottom: 3 }}>{serviceDeskSummary.acao}</div>
+                      <div style={{ fontSize: 11, color: "var(--gaq-text-2)", lineHeight: 1.45 }}>
+                        Com quem está: <b>{serviceDeskSummary.comQuem}</b>
+                        {serviceDeskSummary.ultimaPendencia ? <> · Última interação: {serviceDeskSummary.ultimaPendencia.slice(0, 150)}{serviceDeskSummary.ultimaPendencia.length > 150 ? "..." : ""}</> : null}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <div style={{ fontSize: 8, color: "var(--gaq-text-3)", textTransform: "uppercase", letterSpacing: ".04em" }}>histórico</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#ea580c" }}>{serviceDeskSummary.interacoes.length} inter.</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
             {ents.map((en, idx) => {
               let prev = null;
               for (let i = idx - 1; i >= 0; i--) { if (ents[i].date) { prev = ents[i].date; break; } }
@@ -988,7 +1304,10 @@ const TimelineModal = ({ proc, onClose, onOpenTags, onUpdate, phaseIntervals, on
                           {PHASE_RESP[en.key] && <span style={{ fontSize: 9, fontWeight: 700, color: en.date ? "#fff" : "var(--gaq-text-3)", background: en.date ? phaseColor : "var(--gaq-bg-2)", border: en.date ? "none" : "1px solid var(--gaq-line)", borderRadius: 999, padding: "1px 7px", textTransform: "none", letterSpacing: 0 }}>{PHASE_RESP[en.key]}</span>}
                         </div>
                         {en.date ? (
-                          <div className="gaq-num" style={{ fontSize: 14, fontWeight: 700, color: "var(--gaq-text)", letterSpacing: "-0.01em" }}>{fmt(en.date)}</div>
+                          <div>
+                            <div className="gaq-num" style={{ fontSize: 14, fontWeight: 700, color: "var(--gaq-text)", letterSpacing: "-0.01em" }}>{fmt(en.date)}</div>
+                            {en.fromHistory && <span style={{ fontSize: 9, color: "var(--gaq-text-3)", fontStyle: "italic", letterSpacing: ".02em" }}>⊙ hist. SD</span>}
+                          </div>
                         ) : isPred ? (
                           <div style={{ fontSize: 13, fontWeight: 600, color: "#e67e22", fontStyle: "italic", display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
                             <span>~{pred.date.toLocaleDateString("pt-BR")}</span>
@@ -1038,6 +1357,7 @@ const TimelineModal = ({ proc, onClose, onOpenTags, onUpdate, phaseIntervals, on
       </div>
     </div>
     {showHist && <HistoricoModal proc={proc} onClose={() => setShowHist(false)} />}
+    {showServiceDeskHist && serviceDeskRecord && <ServiceDeskHistoryModal ticket={proc.TicketSD} record={serviceDeskRecord} onClose={() => setShowServiceDeskHist(false)} />}
   </>);
 };
 
@@ -1109,8 +1429,7 @@ const ProcCard = ({ r, tipo, onClickComp, onClickProc, onOpenTags, tagVersion, o
 
 const MiniTimeline = ({ r }) => {
   if (!r || r.faseAtualIdx < 0) return null;
-  const tlColsR = getTLColsForProc(r);
-  const total = r.isNonCPL ? (IDX_ENVIO_PEDIDO + 1) : tlColsR.length;
+  const total = r.isNonCPL ? (IDX_ENVIO_PEDIDO + 1) : TL_COLS.length;
   const cur = Math.min(r.faseAtualIdx, total - 1);
   const pct = Math.round((cur / Math.max(total - 1, 1)) * 100);
   const color = r.faseSubarea === "CPL" ? "#8e44ad" : r.faseSubarea === "Scont" ? "#16a085" : "#2e86c1";
@@ -1189,6 +1508,7 @@ const RecCard = ({ r, i, pool }) => {
 function App() {
   const [rawRows, setRawRows] = useState([]);
   const [base, setBase] = useState([]);
+  const [serviceDeskData, setServiceDeskData] = useState({});
   const [meta, setMeta] = useState(null);
   const [aba, setAba] = useState("upload");
   const [loading, setLoading] = useState(false);
@@ -1475,6 +1795,7 @@ useEffect(() => {
   const [pgAlertRC, setPgAlertRC] = useState(1); const [pgAlertRCSz, setPgAlertRCSz] = useState(20);
   const [pgAlertSD, setPgAlertSD] = useState(1); const [pgAlertSDSz, setPgAlertSDSz] = useState(20);
   const [pgAlertSDEnc, setPgAlertSDEnc] = useState(1); const [pgAlertSDEncSz, setPgAlertSDEncSz] = useState(20);
+  const [sdCopyStatus, setSdCopyStatus] = useState("");
   const [pgAll, setPgAll] = useState(1); const [pgAllSz, setPgAllSz] = useState(50);
   const [sortAll, setSortAll] = useState({ col: "diasTotais", dir: "desc" });
 
@@ -1789,6 +2110,14 @@ useEffect(() => {
       TagsManager.importTags(window.__PAINEL_TAGS__);
       refreshTags();
     }
+    if (window.__SERVICE_DESK__ && typeof window.__SERVICE_DESK__ === "object") {
+      setServiceDeskData(window.__SERVICE_DESK__);
+    } else {
+      fetch("./chamados_servicedesk.json?ts=" + Date.now(), { cache: "no-store" })
+        .then(r => { if (!r.ok) throw new Error("x"); return r.json(); })
+        .then(data => { if (data && typeof data === "object") setServiceDeskData(data); })
+        .catch(() => {});
+    }
     // Fallback: tenta fetch (funciona se servido por HTTP)
     if (!loaded) {
       fetch("./dados.json")
@@ -1905,7 +2234,12 @@ useEffect(() => {
     return [...s].filter(c => !IGNORAR.includes(nrm(c))).sort();
   }, [baseVis]);
 
-  const fBase = useMemo(() => baseVis.filter(r => {
+  const baseEnriched = useMemo(() => {
+    if (!serviceDeskData || !Object.keys(serviceDeskData).length) return baseVis;
+    return baseVis.map(proc => enrichWithSDHistory(proc, serviceDeskData));
+  }, [baseVis, serviceDeskData]);
+
+  const fBase = useMemo(() => baseEnriched.filter(r => {
     if (fAnoSD && String(r.anoSD) !== fAnoSD) return false;
     if (fAnoRC && String(r.anoRC) !== fAnoRC) return false;
     if (fMod && nrm(r.Modalidade) !== nrm(fMod)) return false;
@@ -1919,7 +2253,7 @@ useEffect(() => {
     if (fTag && !TagsManager.getForProcess(r.ProcessKey, r.TicketSD).includes(fTag)) return false;
     if (fWatch && !WatchlistManager.isWatched(r.ProcessKey)) return false;
     return true;
-  }), [baseVis, fAnoSD, fAnoRC, fMod, fArea, fSt, fStDet, fComp, fAval, fAnalista, fSubarea, fTag, tagVersion, fWatch, watchVersion]);
+  }), [baseEnriched, fAnoSD, fAnoRC, fMod, fArea, fSt, fStDet, fComp, fAval, fAnalista, fSubarea, fTag, tagVersion, fWatch, watchVersion]);
 
   const fBack = useMemo(() => fBase.filter(r => r.emA), [fBase]);
 
@@ -3040,13 +3374,14 @@ const topModLentas = (() => {
       // Cancelados/fracassados podem ter ordem de datas atípica por conta do encerramento — ignorar
       if (r.isCanceled || r.isFailed) return [];
       const modNrm = nrm(r.Modalidade || "");
-      const tlColsR = getTLColsForProc(r);
-      const idxs = r.NumRC ? getTLColsForMod(modNrm, r) : [0, 1, 2];
+      const idxs = r.NumRC ? getTLColsForMod(modNrm) : [0, 1, 2];
       let prevDate = null;
       let prevLabel = "";
       for (const idx of idxs) {
-        const [label, key] = tlColsR[idx] || [];
+        const [label, key] = TL_COLS[idx] || [];
         if (!key) continue;
+        // Indicação Analista é fase volátil — pode acontecer fora da sequência cronológica padrão.
+        if (VOLATILE_TIMELINE_KEYS.has(key)) continue;
         const current = pd(r[key]);
         if (!current) continue;
         if (prevDate && current < prevDate) {
@@ -4403,13 +4738,17 @@ PERGUNTA DO USUÁRIO: ${q}`;
                 const faseSLA = dynamicSLA || baseSLA;
                 const hoje = new Date();
 
-                // 1) Determinar posição de cada processo pela ÚLTIMA DATA PREENCHIDA
+                // 1) Determinar posição de cada processo pela ÚLTIMA DATA PREENCHIDA.
+                // Ignora fases voláteis (ex.: Indicação Analista) — sua data não representa
+                // o avanço do processo no trilho, pois pode acontecer fora de sequência.
                 const procLastIdx = new Map();
                 modProcs.forEach(r => {
                   let lastIdx = -1;
                   for (let ci = colIdxs.length - 1; ci >= 0; ci--) {
                     const cIdx = colIdxs[ci];
-                    if (pd(r[TL_COLS[cIdx][1]])) { lastIdx = cIdx; break; }
+                    const k = TL_COLS[cIdx][1];
+                    if (VOLATILE_TIMELINE_KEYS.has(k)) continue;
+                    if (pd(r[k])) { lastIdx = cIdx; break; }
                   }
                   // Se nenhuma data preenchida, colocar na primeira fase
                   if (lastIdx < 0) lastIdx = colIdxs[0];
@@ -7691,15 +8030,27 @@ GAQ — Gerência de Aquisições`;
                   </div>
                   <div style={{ display: "flex", gap: 8 }}>
                     {alertSD.length > 0 && (
-                      <button onClick={() => exportToExcel(alertSD, "alerta_sd.xlsx")}
+                      <button onClick={() => { const sdSummaries = {}; [...alertSDAberto, ...alertSDEncerrado].forEach(r => { if (r.TicketSD) sdSummaries[String(r.TicketSD).trim()] = getServiceDeskAlertSummary(r, serviceDeskData); }); exportAlertaSDToExcel(alertSD, sdSummaries); }}
                         style={{ background: "rgba(255,255,255,.16)", color: "#fff", border: "1px solid rgba(255,255,255,.28)", borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontSize: 12, fontWeight: 600, backdropFilter: "blur(8px)" }}>
                         Exportar Excel
                       </button>
                     )}
                     {alertSD.length > 0 && (
-                      <button onClick={() => { const html = gerarRelatorioAlertaSD({ sdAberto: alertSDAberto, sdEncerrado: alertSDEncerrado, area: fArea || "Todas as Áreas", meta, fBase }); const win = window.open("", "_blank"); win.document.write(html); win.document.close(); }}
+                      <button onClick={() => { const sdSummaries = {}; [...alertSDAberto, ...alertSDEncerrado].forEach(r => { if (r.TicketSD) sdSummaries[String(r.TicketSD).trim()] = getServiceDeskAlertSummary(r, serviceDeskData); }); const html = gerarRelatorioAlertaSD({ sdAberto: alertSDAberto, sdEncerrado: alertSDEncerrado, area: fArea || "Todas as Áreas", meta, fBase, sdSummaries }); const win = window.open("", "_blank"); win.document.write(html); win.document.close(); }}
                         style={{ background: "#fff", color: "#065f46", border: "none", borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
                         PDF Alerta Pré-compra
+                      </button>
+                    )}
+                    {alertSDAberto.length > 0 && (
+                      <button onClick={async () => { const ids = alertSDAberto.filter(r => { if (!r.TicketSD) return false; const rec = getServiceDeskRecord(String(r.TicketSD).trim(), serviceDeskData); if (!rec) return true; const en = nrm((rec.informacoes_do_chamado || {}).estado || ""); return !en.includes("finalizado") && !en.includes("fechado") && !en.includes("concluido"); }).map(r => String(r.TicketSD || "").trim()).filter(Boolean); const script = gerarScriptExtratorOTRS(ids, "rapido"); try { await navigator.clipboard.writeText(script); setSdCopyStatus("rapido"); setTimeout(() => setSdCopyStatus(""), 2500); } catch { setSdCopyStatus(""); } }}
+                        style={{ background: sdCopyStatus === "rapido" ? "#d1fae5" : "rgba(255,255,255,.13)", color: sdCopyStatus === "rapido" ? "#065f46" : "#fff", border: "1px solid rgba(255,255,255,.28)", borderRadius: 10, padding: "8px 14px", cursor: "pointer", fontSize: 11, fontWeight: 600, backdropFilter: "blur(8px)", transition: "all .2s", whiteSpace: "nowrap" }}>
+                        {sdCopyStatus === "rapido" ? "✓ Copiado!" : `Script Rápido (${alertSDAberto.length})`}
+                      </button>
+                    )}
+                    {alertSDAberto.length > 0 && (
+                      <button onClick={async () => { const ids = alertSDAberto.filter(r => { if (!r.TicketSD) return false; const rec = getServiceDeskRecord(String(r.TicketSD).trim(), serviceDeskData); if (!rec) return true; const en = nrm((rec.informacoes_do_chamado || {}).estado || ""); return !en.includes("finalizado") && !en.includes("fechado") && !en.includes("concluido"); }).map(r => String(r.TicketSD || "").trim()).filter(Boolean); const script = gerarScriptExtratorOTRS(ids, "diurno"); try { await navigator.clipboard.writeText(script); setSdCopyStatus("diurno"); setTimeout(() => setSdCopyStatus(""), 2500); } catch { setSdCopyStatus(""); } }}
+                        style={{ background: sdCopyStatus === "diurno" ? "#d1fae5" : "rgba(255,255,255,.13)", color: sdCopyStatus === "diurno" ? "#065f46" : "#fff", border: "1px solid rgba(255,255,255,.28)", borderRadius: 10, padding: "8px 14px", cursor: "pointer", fontSize: 11, fontWeight: 600, backdropFilter: "blur(8px)", transition: "all .2s", whiteSpace: "nowrap" }}>
+                        {sdCopyStatus === "diurno" ? "✓ Copiado!" : `Script Diurno (${alertSDAberto.length})`}
                       </button>
                     )}
                   </div>
@@ -7754,6 +8105,7 @@ GAQ — Gerência de Aquisições`;
                   const bgBadge = du_ > PRAZO_SD ? "#fff1f2" : du_ > 7 ? "#fff7ed" : "#f0fdf4";
                   const tags = TagsManager.getForProcess(r.ProcessKey, r.TicketSD);
                   const watched = WatchlistManager.isWatched(r.ProcessKey);
+                  const sdAlert = getServiceDeskAlertSummary(r, serviceDeskData);
                   return (
                     <div key={r.ProcessKey + i}
                       style={{ background: "var(--card)", borderRadius: 12, padding: "12px 16px", boxShadow: "0 1px 4px rgba(0,0,0,.06)", marginBottom: 8, border: `1px solid ${borderCor}`, borderLeft: `4px solid ${cor}`, cursor: "pointer", outline: watched ? "2px solid #f59e0b44" : "none" }}
@@ -7762,10 +8114,10 @@ GAQ — Gerência de Aquisições`;
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", marginBottom: 5 }}>
                             {watched && <span style={{ fontSize: 11, color: "#f59e0b" }}>⭐</span>}
-                            <span style={{ fontWeight: 700, color: "#15803d", fontSize: 13 }}>Pré-compra {r.TicketSD}</span>
-                            <span style={{ fontSize: 10, background: "#fef2f2", borderRadius: 6, padding: "1px 7px", color: "#dc2626", fontWeight: 700 }}>sem RC</span>
-                            {r.atrasoSD && <span style={{ fontSize: 10, background: "#dc2626", color: "#fff", borderRadius: 20, padding: "2px 9px", fontWeight: 700 }}>ATRASO &gt;{PRAZO_SD} d.u.</span>}
-                            {!r.atrasoSD && du_ > 7 && <span style={{ fontSize: 10, background: "#fff7ed", color: "#c2410c", borderRadius: 20, padding: "2px 9px", fontWeight: 700, border: "1px solid #fed7aa" }}>ATENÇÃO</span>}
+                            <span style={{ fontWeight: 700, color: "var(--gaq-text)", fontSize: 13 }}>Pré-compra {r.TicketSD}</span>
+                            <span style={{ fontSize: 10, background: "transparent", borderRadius: 6, padding: "1px 7px", color: "#dc2626", fontWeight: 600, border: "1px solid #fca5a5" }}>sem RC</span>
+                            {r.atrasoSD && <span style={{ fontSize: 10, background: "#dc2626", color: "#fff", borderRadius: 6, padding: "2px 9px", fontWeight: 700 }}>ATRASO &gt;{PRAZO_SD} d.u.</span>}
+                            {!r.atrasoSD && du_ > 7 && <span style={{ fontSize: 10, background: "transparent", color: "#c2410c", borderRadius: 6, padding: "2px 9px", fontWeight: 600, border: "1px solid #fed7aa" }}>ATENÇÃO {du_} d.u.</span>}
                             {r["Área Requisitante"] && <span style={{ fontSize: 10, background: "#eff6ff", color: "#2563eb", borderRadius: 6, padding: "1px 7px", fontWeight: 600 }}>{r["Área Requisitante"]}</span>}
                             {r.Modalidade && <span style={{ fontSize: 10, color: "var(--text3)" }}>{r.Modalidade}</span>}
                             <span onClick={(e) => { e.stopPropagation(); onOpenTags(r); }} style={{ fontSize: 10, cursor: "pointer", color: "var(--text3)", textDecoration: "underline" }}>+tag</span>
@@ -7773,6 +8125,7 @@ GAQ — Gerência de Aquisições`;
                           </div>
                           {r.statusDet && <div style={{ display: "inline-block", fontSize: 10, color: "#7c3aed", background: "#f5f3ff", borderRadius: 5, padding: "1px 7px", marginBottom: 4 }}>{r.statusDet}</div>}
                           <div style={{ fontSize: 12, color: "var(--text)", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(r.Objeto || "").slice(0, 100) || "—"}</div>
+                          <ServiceDeskAlertStrip summary={sdAlert} />
                           <div style={{ display: "flex", gap: 5, flexWrap: "wrap", fontSize: 10, color: "var(--text3)" }}>
                             {r.Comprador && <span>Comp: <b style={{ color: "var(--text2)" }}>{r.Comprador}</b></span>}
                             {r.Avaliador && <span>· Aval: <b style={{ color: "var(--text2)" }}>{r.Avaliador}</b></span>}
@@ -7810,6 +8163,7 @@ GAQ — Gerência de Aquisições`;
                   const bgBadge = duEnc > 7 ? "#fff1f2" : duEnc > 3 ? "#fff7ed" : "#fffbeb";
                   const tags = TagsManager.getForProcess(r.ProcessKey, r.TicketSD);
                   const watched = WatchlistManager.isWatched(r.ProcessKey);
+                  const sdAlert = getServiceDeskAlertSummary(r, serviceDeskData);
                   return (
                     <div key={r.ProcessKey + i}
                       style={{ background: "var(--card)", borderRadius: 12, padding: "12px 16px", boxShadow: "0 1px 4px rgba(0,0,0,.06)", marginBottom: 8, border: `1px solid ${borderCor}`, borderLeft: `4px solid ${cor}`, cursor: "pointer", outline: watched ? "2px solid #f59e0b44" : "none" }}
@@ -7818,10 +8172,9 @@ GAQ — Gerência de Aquisições`;
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", marginBottom: 5 }}>
                             {watched && <span style={{ fontSize: 11, color: "#f59e0b" }}>⭐</span>}
-                            <span style={{ fontWeight: 700, color: "#b45309", fontSize: 13 }}>Pré-compra {r.TicketSD}</span>
-                            <span style={{ fontSize: 10, background: "#fef3c7", borderRadius: 6, padding: "1px 7px", color: "#b45309", fontWeight: 700 }}>pré-compra encerrada</span>
-                            <span style={{ fontSize: 10, background: "#fef2f2", borderRadius: 6, padding: "1px 7px", color: "#dc2626", fontWeight: 700 }}>sem RC</span>
-                            {duEnc > 7 && <span style={{ fontSize: 10, background: "#dc2626", color: "#fff", borderRadius: 20, padding: "2px 9px", fontWeight: 700 }}>URGENTE: {duEnc} d.u. s/ RC</span>}
+                            <span style={{ fontWeight: 700, color: "var(--gaq-text)", fontSize: 13 }}>Pré-compra {r.TicketSD}</span>
+                            <span style={{ fontSize: 10, background: "transparent", borderRadius: 6, padding: "1px 7px", color: "#b45309", fontWeight: 600, border: "1px solid #fde68a" }}>enc. sem RC</span>
+                            {duEnc > 7 && <span style={{ fontSize: 10, background: "#dc2626", color: "#fff", borderRadius: 6, padding: "2px 9px", fontWeight: 700 }}>URGENTE {duEnc} d.u.</span>}
                             {r["Área Requisitante"] && <span style={{ fontSize: 10, background: "#eff6ff", color: "#2563eb", borderRadius: 6, padding: "1px 7px", fontWeight: 700 }}>{r["Área Requisitante"]}</span>}
                             {r.Modalidade && <span style={{ fontSize: 10, color: "var(--text3)" }}>{r.Modalidade}</span>}
                             <span onClick={(e) => { e.stopPropagation(); onOpenTags(r); }} style={{ fontSize: 10, cursor: "pointer", color: "var(--text3)", textDecoration: "underline" }}>+tag</span>
@@ -7829,6 +8182,7 @@ GAQ — Gerência de Aquisições`;
                           </div>
                           {r.statusDet && <div style={{ display: "inline-block", fontSize: 10, color: "#7c3aed", background: "#f5f3ff", borderRadius: 5, padding: "1px 7px", marginBottom: 4 }}>{r.statusDet}</div>}
                           <div style={{ fontSize: 12, color: "var(--text)", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(r.Objeto || "").slice(0, 100) || "—"}</div>
+                          <ServiceDeskAlertStrip summary={sdAlert} />
                           <div style={{ display: "flex", gap: 5, flexWrap: "wrap", fontSize: 10, color: "var(--text3)" }}>
                             {r["Área Requisitante"] && <span>Área: <b style={{ color: "var(--text2)" }}>{r["Área Requisitante"]}</b></span>}
                             {r.aberturaSD && <span>· Abertura pré-compra: <b style={{ color: "var(--text2)" }}>{r.aberturaSD.toLocaleDateString("pt-BR")}</b></span>}
@@ -9150,7 +9504,7 @@ GAQ — Gerência de Aquisições`;
           })()}
         </div>}
 
-      {selProc && <TimelineModal proc={selProc} onClose={() => setSelProc(null)} onOpenTags={onOpenTags} onUpdate={refreshTags} phaseIntervals={phaseIntervals} onToggleWatch={toggleWatch} watchVersion={watchVersion} hidePredictions={isDiretor} />}
+      {selProc && <TimelineModal proc={selProc} onClose={() => setSelProc(null)} onOpenTags={onOpenTags} onUpdate={refreshTags} phaseIntervals={phaseIntervals} onToggleWatch={toggleWatch} watchVersion={watchVersion} hidePredictions={isDiretor} serviceDeskData={serviceDeskData} />}
       {tagModal && <TagModal proc={tagModal} onClose={() => setTagModal(null)} onUpdate={refreshTags} />}
       {pantanalSel && <PantanalModal proc={pantanalSel} onClose={() => setPantanalSel(null)} />}
 
@@ -9230,5 +9584,519 @@ GAQ — Gerência de Aquisições`;
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
   </script>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     TEMPLATES DOS SCRIPTS DE EXTRAÇÃO OTRS
+     Usados por gerarScriptExtratorOTRS() — NÃO são executados.
+     Conteúdo raw: backticks e ${} são preservados literalmente.
+═══════════════════════════════════════════════════════════════ -->
+
+<script type="text/template" id="otrs-tpl-rapido">
+(async function extrairChamados() {
+
+  const LISTA_CHAMADOS = {{LISTA_CHAMADOS}};
+  const DELAY_ENTRE_CHAMADOS_MS = 2500;
+  const resultado = {};
+
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  function limparTexto(txt) {
+    if (!txt) return "";
+    return txt
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  async function fetchTicketHTML(numero) {
+    const searchURL = `https://servicedesk.sesc.com.br/otrs/index.pl?Action=AgentTicketSearch;Subaction=Search;TicketNumber=${numero}`;
+    const resp = await fetch(searchURL, { credentials: "include" });
+    const html = await resp.text();
+    const matchZoom = html.match(/AgentTicketZoom;TicketID=(\d+)/);
+    if (!matchZoom) {
+      const matchDirect = resp.url.match(/TicketID=(\d+)/);
+      if (!matchDirect) return null;
+      const zoomURL = `https://servicedesk.sesc.com.br/otrs/index.pl?Action=AgentTicketZoom;TicketID=${matchDirect[1]}`;
+      const rz = await fetch(zoomURL, { credentials: "include" });
+      return { ticketId: matchDirect[1], html: await rz.text() };
+    }
+    const zoomURL = `https://servicedesk.sesc.com.br/otrs/index.pl?Action=AgentTicketZoom;TicketID=${matchZoom[1]}`;
+    const respZoom = await fetch(zoomURL, { credentials: "include" });
+    return { ticketId: matchZoom[1], html: await respZoom.text() };
+  }
+
+  async function fetchIframeTexto(src) {
+    if (!src || src === "about:blank") return "";
+    try {
+      const url = src.startsWith("http") ? src : `https://servicedesk.sesc.com.br${src}`;
+      const resp = await fetch(url, { credentials: "include" });
+      const html = await resp.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, "text/html");
+      return limparTexto(doc.body ? (doc.body.innerText || doc.body.textContent || "") : "");
+    } catch (e) {
+      return "";
+    }
+  }
+
+  function getValorLabel(container, labelTexto) {
+    const labels = Array.from(container.querySelectorAll("label"));
+    const lbl = labels.find(l => (l.innerText || l.textContent || "").trim() === labelTexto);
+    if (!lbl) return "";
+    const next = lbl.nextElementSibling;
+    return next ? limparTexto(next.innerText || next.textContent || "") : "";
+  }
+
+  function extrairSidebar(doc) {
+    const sidebar = doc.querySelector(".SidebarColumn");
+    if (!sidebar) return { infoChamado: {}, infoCliente: {} };
+    function getVal(texto) { return getValorLabel(sidebar, texto); }
+    const infoChamado = {
+      tipo                          : getVal("Tipo:"),
+      idade                         : getVal("Idade:"),
+      criado                        : getVal("Criado:"),
+      estado                        : getVal("Estado:"),
+      bloqueio                      : getVal("Bloqueio:"),
+      fila                          : getVal("Fila:"),
+      servico                       : getVal("Serviço:"),
+      estado_de_incidente_do_servico: getVal("Estado de Incidente do Serviço:"),
+      acordo_de_nivel_de_servico    : getVal("Acordo de Nível de Serviço:"),
+      prioridade                    : getVal("Prioridade:"),
+      id_do_cliente                 : getVal("ID do Cliente:"),
+      tecnico                       : getVal("Técnico:"),
+      titulo                        : "",
+    };
+    const h1 = doc.querySelector("h1");
+    if (h1) {
+      infoChamado.titulo = (h1.innerText || h1.textContent || "")
+        .replace(/^Ticket#\d+\s*[—\-]\s*/, "").trim();
+    } else {
+      infoChamado.titulo = (doc.title || "")
+        .replace(/^\d+\s*[-—]\s*/, "")
+        .replace(/\s*-\s*Detalhes.*/, "").trim();
+    }
+    const infoCliente = {
+      titulo         : getVal("Título:"),
+      nome           : getVal("Nome:"),
+      sobrenome      : getVal("Sobrenome:"),
+      usuario        : getVal("Usuário:"),
+      email          : getVal("E-mail:"),
+      telefone       : getVal("Telefone:"),
+      endereco       : getVal("Endereço:"),
+      empresa        : getVal("Empresa:"),
+      centro_de_custo: getVal("Centro de Custo:"),
+      matricula      : getVal("Matricula:"),
+    };
+    return { infoChamado, infoCliente };
+  }
+
+  function extrairTabelaArtigos(doc) {
+    const rows = doc.querySelectorAll("#ArticleTable tbody tr");
+    const artigos = [];
+    rows.forEach(row => {
+      const tds = Array.from(row.querySelectorAll("td"));
+      if (tds.length >= 6) {
+        artigos.push({
+          numero : parseInt((tds[1].innerText || tds[1].textContent || "").trim()) || 0,
+          tipo   : limparTexto(tds[2].innerText || tds[2].textContent || ""),
+          de     : limparTexto(tds[4].innerText || tds[4].textContent || ""),
+          assunto: limparTexto(tds[5].innerText || tds[5].textContent || ""),
+          criado : limparTexto(tds[6] ? (tds[6].innerText || tds[6].textContent || "") : ""),
+        });
+      }
+    });
+    return artigos;
+  }
+
+  async function extrairInteracoes(doc) {
+    const widgets = Array.from(doc.querySelectorAll(".WidgetSimple"));
+    const artWidgets = widgets.filter(w => {
+      const h2 = w.querySelector("h2");
+      return h2 && (h2.innerText || h2.textContent || "").match(/Artigo #\d+/);
+    });
+    artWidgets.sort((a, b) => {
+      const na = parseInt(a.querySelector("h2").textContent.match(/Artigo #(\d+)/)[1]);
+      const nb = parseInt(b.querySelector("h2").textContent.match(/Artigo #(\d+)/)[1]);
+      return na - nb;
+    });
+    const interacoes = [];
+    for (const widget of artWidgets) {
+      const h2 = widget.querySelector("h2");
+      const numMatch = (h2.innerText || h2.textContent || "").match(/Artigo #(\d+)/);
+      const numero = numMatch ? parseInt(numMatch[1]) : 0;
+      const fieldset = widget.querySelector("fieldset");
+      const de      = fieldset ? getValorLabel(fieldset, "De:")     : "";
+      const para    = fieldset ? getValorLabel(fieldset, "Para:")    : "";
+      const assunto = fieldset ? getValorLabel(fieldset, "Assunto:") : "";
+      const criado = (() => {
+        const header = widget.querySelector(".Header");
+        if (header) {
+          const m = (header.innerText || header.textContent || "").match(/Criado:\s*([\d\/]+\s[\d:]+)/);
+          if (m) return m[1].trim();
+        }
+        return "";
+      })();
+      const iframeEl = widget.querySelector("iframe:not(#AttachmentWindow)");
+      let mensagem = "";
+      if (iframeEl) {
+        const src = iframeEl.getAttribute("src");
+        mensagem = await fetchIframeTexto(src);
+      }
+      interacoes.push({ numero, tipo: "", de, para, assunto, criado, mensagem });
+    }
+    return interacoes;
+  }
+
+  console.log(`%c[Extrator OTRS] Iniciando extração de ${LISTA_CHAMADOS.length} chamados.`, "color: #4CAF50; font-weight: bold;");
+
+  const progressoSalvo = JSON.parse(sessionStorage.getItem("otrs_extrator_resultado") || "{}");
+  const jaProcessados = new Set(Object.keys(progressoSalvo));
+  Object.assign(resultado, progressoSalvo);
+  if (jaProcessados.size > 0) {
+    console.log(`[Extrator OTRS] Retomando: ${jaProcessados.size} chamados já processados.`);
+  }
+
+  for (let i = 0; i < LISTA_CHAMADOS.length; i++) {
+    const numero = LISTA_CHAMADOS[i];
+    if (jaProcessados.has(numero)) {
+      console.log(`[Extrator OTRS] ⭐ Pulando ${numero} (já processado).`);
+      continue;
+    }
+    console.log(`%c[Extrator OTRS] ⟶ Chamado ${i + 1}/${LISTA_CHAMADOS.length}: #${numero}`, "color: #2196F3; font-weight: bold;");
+    try {
+      const ticketData = await fetchTicketHTML(numero);
+      if (!ticketData) {
+        console.warn(`[Extrator OTRS] ⚠ Não encontrou #${numero}. Pulando.`);
+        resultado[numero] = { erro: "ticket não encontrado" };
+        continue;
+      }
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(ticketData.html, "text/html");
+      const { infoChamado, infoCliente } = extrairSidebar(doc);
+      const tabelaArtigos = extrairTabelaArtigos(doc);
+      const tabelaMap = {};
+      tabelaArtigos.forEach(a => { tabelaMap[a.numero] = a; });
+      const interacoesRaw = await extrairInteracoes(doc);
+      const interacoes = interacoesRaw.map(art => {
+        const tabRow = tabelaMap[art.numero] || {};
+        return {
+          numero  : art.numero,
+          tipo    : tabRow.tipo    || art.tipo,
+          de      : art.de        || tabRow.de || "",
+          para    : art.para,
+          assunto : art.assunto   || tabRow.assunto || "",
+          criado  : art.criado    || tabRow.criado  || "",
+          mensagem: art.mensagem,
+        };
+      });
+      resultado[numero] = {
+        informacoes_do_chamado: infoChamado,
+        informacoes_do_cliente: infoCliente,
+        interacoes,
+      };
+      sessionStorage.setItem("otrs_extrator_resultado", JSON.stringify(resultado));
+      console.log(`[Extrator OTRS] ✓ #${numero} extraído — ${interacoes.length} interações.`);
+    } catch (e) {
+      console.error(`[Extrator OTRS] ✗ Erro no chamado #${numero}:`, e);
+      resultado[numero] = { erro: String(e) };
+    }
+    if (i < LISTA_CHAMADOS.length - 1) {
+      console.log(`[Extrator OTRS] ⏳ Aguardando ${DELAY_ENTRE_CHAMADOS_MS / 1000}s...`);
+      await sleep(DELAY_ENTRE_CHAMADOS_MS);
+    }
+  }
+
+  console.log("%c[Extrator OTRS] Todos os chamados processados. Gerando arquivo...", "color: #4CAF50; font-weight: bold;");
+  const jsonFinal = JSON.stringify(resultado, null, 2);
+  try { JSON.parse(jsonFinal); console.log("[Extrator OTRS] ✓ JSON válido."); }
+  catch (e) { console.error("[Extrator OTRS] ✗ JSON inválido:", e); }
+  const blob = new Blob([new TextEncoder().encode(jsonFinal)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "chamados_servicedesk.json";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  sessionStorage.removeItem("otrs_extrator_resultado");
+  console.log("%c[Extrator OTRS] ✓ Download disparado: chamados_servicedesk.json", "color: #4CAF50; font-weight: bold;");
+  return resultado;
+})();
+</script>
+
+<script type="text/template" id="otrs-tpl-diurno">
+(async function extrairChamados() {
+
+  const LISTA_CHAMADOS = {{LISTA_CHAMADOS}};
+  const DELAY_ENTRE_CHAMADOS_MS = 10000;
+  const TAMANHO_LOTE = 10;
+  const PAUSA_ENTRE_LOTES_MS = 180000;
+  const PAUSA_ERRO_HTTP_MS = 60000;
+
+  const resultado = {};
+
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async function fetchComChecagem(url, options = {}, contexto = "") {
+    const resp = await fetch(url, options);
+    if (!resp.ok) {
+      console.warn(`[Extrator OTRS] ⚠ Erro HTTP ${resp.status} ${resp.statusText}${contexto ? ` em ${contexto}` : ""}. Aguardando ${PAUSA_ERRO_HTTP_MS / 1000}s...`);
+      await sleep(PAUSA_ERRO_HTTP_MS);
+      const retry = await fetch(url, options);
+      if (!retry.ok) throw new Error(`Erro HTTP ${retry.status} após nova tentativa${contexto ? ` em ${contexto}` : ""}`);
+      return retry;
+    }
+    return resp;
+  }
+
+  function limparTexto(txt) {
+    if (!txt) return "";
+    return txt
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  async function fetchTicketHTML(numero) {
+    const searchURL = `https://servicedesk.sesc.com.br/otrs/index.pl?Action=AgentTicketSearch;Subaction=Search;TicketNumber=${numero}`;
+    const resp = await fetchComChecagem(searchURL, { credentials: "include" }, `busca do chamado #${numero}`);
+    const html = await resp.text();
+    const matchZoom = html.match(/AgentTicketZoom;TicketID=(\d+)/);
+    if (!matchZoom) {
+      const matchDirect = resp.url.match(/TicketID=(\d+)/);
+      if (!matchDirect) return null;
+      const zoomURL = `https://servicedesk.sesc.com.br/otrs/index.pl?Action=AgentTicketZoom;TicketID=${matchDirect[1]}`;
+      const rz = await fetchComChecagem(zoomURL, { credentials: "include" }, `zoom direto do chamado #${numero}`);
+      return { ticketId: matchDirect[1], html: await rz.text() };
+    }
+    const zoomURL = `https://servicedesk.sesc.com.br/otrs/index.pl?Action=AgentTicketZoom;TicketID=${matchZoom[1]}`;
+    const respZoom = await fetchComChecagem(zoomURL, { credentials: "include" }, `zoom do chamado #${numero}`);
+    return { ticketId: matchZoom[1], html: await respZoom.text() };
+  }
+
+  async function fetchIframeTexto(src) {
+    if (!src || src === "about:blank") return "";
+    try {
+      const url = src.startsWith("http") ? src : `https://servicedesk.sesc.com.br${src}`;
+      const resp = await fetchComChecagem(url, { credentials: "include" }, "iframe/artigo");
+      const html = await resp.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, "text/html");
+      return limparTexto(doc.body ? (doc.body.innerText || doc.body.textContent || "") : "");
+    } catch (e) {
+      console.warn("[Extrator OTRS] ⚠ Erro ao extrair texto do iframe:", e);
+      return "";
+    }
+  }
+
+  function getValorLabel(container, labelTexto) {
+    const labels = Array.from(container.querySelectorAll("label"));
+    const lbl = labels.find(l => (l.innerText || l.textContent || "").trim() === labelTexto);
+    if (!lbl) return "";
+    const next = lbl.nextElementSibling;
+    return next ? limparTexto(next.innerText || next.textContent || "") : "";
+  }
+
+  function extrairSidebar(doc) {
+    const sidebar = doc.querySelector(".SidebarColumn");
+    if (!sidebar) return { infoChamado: {}, infoCliente: {} };
+    function getVal(texto) { return getValorLabel(sidebar, texto); }
+    const infoChamado = {
+      tipo                          : getVal("Tipo:"),
+      idade                         : getVal("Idade:"),
+      criado                        : getVal("Criado:"),
+      estado                        : getVal("Estado:"),
+      bloqueio                      : getVal("Bloqueio:"),
+      fila                          : getVal("Fila:"),
+      servico                       : getVal("Serviço:"),
+      estado_de_incidente_do_servico: getVal("Estado de Incidente do Serviço:"),
+      acordo_de_nivel_de_servico    : getVal("Acordo de Nível de Serviço:"),
+      prioridade                    : getVal("Prioridade:"),
+      id_do_cliente                 : getVal("ID do Cliente:"),
+      tecnico                       : getVal("Técnico:"),
+      titulo                        : "",
+    };
+    const h1 = doc.querySelector("h1");
+    if (h1) {
+      infoChamado.titulo = (h1.innerText || h1.textContent || "")
+        .replace(/^Ticket#\d+\s*[—\-]\s*/, "").trim();
+    } else {
+      infoChamado.titulo = (doc.title || "")
+        .replace(/^\d+\s*[-—]\s*/, "")
+        .replace(/\s*-\s*Detalhes.*/, "").trim();
+    }
+    const infoCliente = {
+      titulo         : getVal("Título:"),
+      nome           : getVal("Nome:"),
+      sobrenome      : getVal("Sobrenome:"),
+      usuario        : getVal("Usuário:"),
+      email          : getVal("E-mail:"),
+      telefone       : getVal("Telefone:"),
+      endereco       : getVal("Endereço:"),
+      empresa        : getVal("Empresa:"),
+      centro_de_custo: getVal("Centro de Custo:"),
+      matricula      : getVal("Matricula:"),
+    };
+    return { infoChamado, infoCliente };
+  }
+
+  function extrairTabelaArtigos(doc) {
+    const rows = doc.querySelectorAll("#ArticleTable tbody tr");
+    const artigos = [];
+    rows.forEach(row => {
+      const tds = Array.from(row.querySelectorAll("td"));
+      if (tds.length >= 6) {
+        artigos.push({
+          numero : parseInt((tds[1].innerText || tds[1].textContent || "").trim()) || 0,
+          tipo   : limparTexto(tds[2].innerText || tds[2].textContent || ""),
+          de     : limparTexto(tds[4].innerText || tds[4].textContent || ""),
+          assunto: limparTexto(tds[5].innerText || tds[5].textContent || ""),
+          criado : limparTexto(tds[6] ? (tds[6].innerText || tds[6].textContent || "") : ""),
+        });
+      }
+    });
+    return artigos;
+  }
+
+  async function extrairInteracoes(doc) {
+    const widgets = Array.from(doc.querySelectorAll(".WidgetSimple"));
+    const artWidgets = widgets.filter(w => {
+      const h2 = w.querySelector("h2");
+      return h2 && (h2.innerText || h2.textContent || "").match(/Artigo #\d+/);
+    });
+    artWidgets.sort((a, b) => {
+      const na = parseInt(a.querySelector("h2").textContent.match(/Artigo #(\d+)/)[1]);
+      const nb = parseInt(b.querySelector("h2").textContent.match(/Artigo #(\d+)/)[1]);
+      return na - nb;
+    });
+    const interacoes = [];
+    for (const widget of artWidgets) {
+      const h2 = widget.querySelector("h2");
+      const numMatch = (h2.innerText || h2.textContent || "").match(/Artigo #(\d+)/);
+      const numero = numMatch ? parseInt(numMatch[1]) : 0;
+      const fieldset = widget.querySelector("fieldset");
+      const de      = fieldset ? getValorLabel(fieldset, "De:")     : "";
+      const para    = fieldset ? getValorLabel(fieldset, "Para:")    : "";
+      const assunto = fieldset ? getValorLabel(fieldset, "Assunto:") : "";
+      const criado = (() => {
+        const header = widget.querySelector(".Header");
+        if (header) {
+          const m = (header.innerText || header.textContent || "").match(/Criado:\s*([\d\/]+\s[\d:]+)/);
+          if (m) return m[1].trim();
+        }
+        return "";
+      })();
+      const iframeEl = widget.querySelector("iframe:not(#AttachmentWindow)");
+      let mensagem = "";
+      if (iframeEl) {
+        const src = iframeEl.getAttribute("src");
+        mensagem = await fetchIframeTexto(src);
+      }
+      interacoes.push({ numero, tipo: "", de, para, assunto, criado, mensagem });
+    }
+    return interacoes;
+  }
+
+  console.log(`%c[Extrator OTRS] Iniciando extração de ${LISTA_CHAMADOS.length} chamados.`, "color: #4CAF50; font-weight: bold;");
+
+  const progressoSalvo = JSON.parse(sessionStorage.getItem("otrs_extrator_resultado") || "{}");
+  const jaProcessados = new Set(Object.keys(progressoSalvo));
+  Object.assign(resultado, progressoSalvo);
+  if (jaProcessados.size > 0) {
+    console.log(`[Extrator OTRS] Retomando: ${jaProcessados.size} chamados já processados.`);
+  }
+
+  let processadosNestaExecucao = 0;
+
+  for (let i = 0; i < LISTA_CHAMADOS.length; i++) {
+    const numero = LISTA_CHAMADOS[i];
+    if (jaProcessados.has(numero)) {
+      console.log(`[Extrator OTRS] ⭐ Pulando ${numero} (já processado).`);
+      continue;
+    }
+    console.log(`%c[Extrator OTRS] ⟶ Chamado ${i + 1}/${LISTA_CHAMADOS.length}: #${numero}`, "color: #2196F3; font-weight: bold;");
+    try {
+      const ticketData = await fetchTicketHTML(numero);
+      if (!ticketData) {
+        console.warn(`[Extrator OTRS] ⚠ Não encontrou #${numero}. Pulando.`);
+        resultado[numero] = { erro: "ticket não encontrado" };
+        sessionStorage.setItem("otrs_extrator_resultado", JSON.stringify(resultado));
+      } else {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(ticketData.html, "text/html");
+        const { infoChamado, infoCliente } = extrairSidebar(doc);
+        const tabelaArtigos = extrairTabelaArtigos(doc);
+        const tabelaMap = {};
+        tabelaArtigos.forEach(a => { tabelaMap[a.numero] = a; });
+        const interacoesRaw = await extrairInteracoes(doc);
+        const interacoes = interacoesRaw.map(art => {
+          const tabRow = tabelaMap[art.numero] || {};
+          return {
+            numero  : art.numero,
+            tipo    : tabRow.tipo    || art.tipo,
+            de      : art.de        || tabRow.de || "",
+            para    : art.para,
+            assunto : art.assunto   || tabRow.assunto || "",
+            criado  : art.criado    || tabRow.criado  || "",
+            mensagem: art.mensagem,
+          };
+        });
+        resultado[numero] = {
+          informacoes_do_chamado: infoChamado,
+          informacoes_do_cliente: infoCliente,
+          interacoes,
+        };
+        sessionStorage.setItem("otrs_extrator_resultado", JSON.stringify(resultado));
+        console.log(`[Extrator OTRS] ✓ #${numero} extraído — ${interacoes.length} interações.`);
+      }
+    } catch (e) {
+      console.error(`[Extrator OTRS] ✗ Erro no chamado #${numero}:`, e);
+      resultado[numero] = { erro: String(e) };
+      sessionStorage.setItem("otrs_extrator_resultado", JSON.stringify(resultado));
+    }
+
+    processadosNestaExecucao++;
+
+    if (
+      processadosNestaExecucao > 0 &&
+      processadosNestaExecucao % TAMANHO_LOTE === 0 &&
+      i < LISTA_CHAMADOS.length - 1
+    ) {
+      console.log(`[Extrator OTRS] 🧊 Lote de ${TAMANHO_LOTE} chamados processado. Pausando por ${PAUSA_ENTRE_LOTES_MS / 1000 / 60} minutos...`);
+      await sleep(PAUSA_ENTRE_LOTES_MS);
+    }
+
+    if (i < LISTA_CHAMADOS.length - 1) {
+      console.log(`[Extrator OTRS] ⏳ Aguardando ${DELAY_ENTRE_CHAMADOS_MS / 1000}s antes do próximo chamado...`);
+      await sleep(DELAY_ENTRE_CHAMADOS_MS);
+    }
+  }
+
+  console.log("%c[Extrator OTRS] Todos os chamados processados. Gerando arquivo...", "color: #4CAF50; font-weight: bold;");
+  const jsonFinal = JSON.stringify(resultado, null, 2);
+  try { JSON.parse(jsonFinal); console.log("[Extrator OTRS] ✓ JSON válido."); }
+  catch (e) { console.error("[Extrator OTRS] ✗ JSON inválido:", e); }
+  const blob = new Blob([new TextEncoder().encode(jsonFinal)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "chamados_servicedesk.json";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  sessionStorage.removeItem("otrs_extrator_resultado");
+  console.log("%c[Extrator OTRS] ✓ Download disparado: chamados_servicedesk.json", "color: #4CAF50; font-weight: bold;");
+  return resultado;
+})();
+</script>
+
 </body>
 </html>

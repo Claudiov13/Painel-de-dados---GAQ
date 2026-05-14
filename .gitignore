@@ -13,6 +13,8 @@ auth.backup.js
 _test_sha256.js
 **/dados.json
 **/tags.json
+chamados_servicedesk*.json
+chamados_servicedesk.js
 
 # Backups e pacotes locais
 Versões anteriores/

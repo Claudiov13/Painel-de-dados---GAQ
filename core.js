@@ -193,36 +193,42 @@ function parseBase(rows) {
     const mesAbertura = dataAbertura ? dataAbertura.getMonth() : null;
     // Fase atual e responsável pela próxima etapa pendente
     // Apenas para processos em andamento — Fracassados, Cancelados e Suspensos ficam vazios
-    // Usa ordem LEGACY para processos abertos em 2024 (SD ou RC) e ordem 2025+ para o resto.
-    const tlCols = (anoSD === 2024 || anoRC === 2024) ? TL_COLS_LEGACY : TL_COLS_2025;
+    // Ignora fases voláteis (ex.: Indicação Analista de Contrato) ao determinar onde o
+    // processo está, pois elas podem ocorrer fora da sequência principal do fluxo.
     let faseAtual = "—", respFase = "—", faseAtualIdx = -1;
     if (emA) {
-      // Fases CPL são ignoradas em processos não-CPL (SCONT/NCL puro)
       let ultimaFasePreenchidaIdx = -1;
-      for (let fi = tlCols.length - 1; fi >= 0; fi--) {
-        if (!temFluxoCPL && isCplTimelineKey(tlCols[fi][1])) continue;
-        if (pd(r[tlCols[fi][1]])) { ultimaFasePreenchidaIdx = fi; break; }
+      for (let fi = TL_COLS.length - 1; fi >= 0; fi--) {
+        const k = TL_COLS[fi][1];
+        if (!temFluxoCPL && isCplTimelineKey(k)) continue;
+        if (VOLATILE_TIMELINE_KEYS.has(k)) continue;
+        if (pd(r[k])) { ultimaFasePreenchidaIdx = fi; break; }
       }
       if (ultimaFasePreenchidaIdx >= 0) {
         let proximaFaseVaziaIdx = -1;
-        for (let fi = ultimaFasePreenchidaIdx + 1; fi < tlCols.length; fi++) {
-          if (!temFluxoCPL && isCplTimelineKey(tlCols[fi][1])) continue;
-          if (!pd(r[tlCols[fi][1]])) { proximaFaseVaziaIdx = fi; break; }
+        for (let fi = ultimaFasePreenchidaIdx + 1; fi < TL_COLS.length; fi++) {
+          const k = TL_COLS[fi][1];
+          if (!temFluxoCPL && isCplTimelineKey(k)) continue;
+          if (VOLATILE_TIMELINE_KEYS.has(k)) continue;
+          if (!pd(r[k])) { proximaFaseVaziaIdx = fi; break; }
         }
         const faseRefIdx = proximaFaseVaziaIdx >= 0 ? proximaFaseVaziaIdx : ultimaFasePreenchidaIdx;
-        faseAtual = tlCols[faseRefIdx][0];
-        respFase = PHASE_RESP[tlCols[faseRefIdx][1]] || "—";
+        faseAtual = TL_COLS[faseRefIdx][0];
+        respFase = PHASE_RESP[TL_COLS[faseRefIdx][1]] || "—";
         faseAtualIdx = faseRefIdx;
       }
     }
-    const faseKey = faseAtualIdx < 0 ? "" : tlCols[faseAtualIdx][1];
+    const faseKey = faseAtualIdx < 0 ? "" : TL_COLS[faseAtualIdx][1];
     const faseSubarea = getTimelineSubareaByKey(faseKey);
     // Responsável atual: segue subárea em andamento; encerrados → "N/A".
-    // Fallback (pré-compra/SD ou subárea indefinida): Avaliador (responsável da pré-compra), depois Comprador.
+    // Cada fase tem um campo principal, mas se ele estiver vazio (típico em
+    // transições NCL→CPL antes da CPL atribuir responsável) cai em cascata
+    // para os papéis adjacentes, garantindo que sempre exista alguém
+    // identificável enquanto houver Avaliador/Comprador na ficha.
     const respAtivo = !emA ? "N/A"
       : faseSubarea === "NCL"   ? (Comprador || Avaliador || "—")
-      : faseSubarea === "CPL"   ? (cplResp || "—")
-      : faseSubarea === "Scont" ? (AnalistaContrato || AdvogadoResp || "—")
+      : faseSubarea === "CPL"   ? (cplResp || Pregoeiro || Comprador || Avaliador || "—")
+      : faseSubarea === "Scont" ? (AnalistaContrato || AdvogadoResp || Comprador || Avaliador || "—")
       : (Avaliador || Comprador || "—");
     // Aging específico desde a RC
     const diasRC = (emA && abRC) ? du(abRC, hoje) : 0;

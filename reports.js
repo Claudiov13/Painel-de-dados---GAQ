@@ -2,6 +2,41 @@
    SEÇÃO 4 — UTILITÁRIOS DE EXPORTAÇÃO
    ══════════════════════════════════════════════════════════════════════════════ */
 
+function exportAlertaSDToExcel(rows, sdSummaries, filename) {
+  filename = filename || "alerta_precompra.xlsx";
+  sdSummaries = sdSummaries || {};
+  var fmtD = function(d) { return d instanceof Date ? d.toLocaleDateString("pt-BR") : (d ? String(d) : ""); };
+  var clean = rows.map(function(r) {
+    var sd = sdSummaries[String(r.TicketSD || "").trim()] || null;
+    return {
+      "Ticket Pré-compra"  : r.TicketSD || "",
+      "Área Requisitante"  : r["Área Requisitante"] || "",
+      "Objeto"             : r.Objeto || "",
+      "Comprador / Resp."  : r.respNCL || r.Comprador || "",
+      "Avaliador"          : r.Avaliador || "",
+      "Status SD"          : sd ? sd.estado : "",
+      "Técnico SD"         : sd ? (sd.info && sd.info.tecnico) || "" : "",
+      "Com quem está"      : sd ? sd.comQuem : "",
+      "Ação necessária"    : sd ? sd.acao : "",
+      "Última inter. SD"   : sd && sd.ultimaInteracaoDate ? fmtD(sd.ultimaInteracaoDate) : "",
+      "d.u. últ. inter."   : sd && sd.diasDesdeUltimaInteracao != null ? sd.diasDesdeUltimaInteracao : "",
+      "Abertura SD"        : fmtD(r.aberturaSD),
+      "Distribuição SD"    : fmtD(r["Data da distribuição do SD"]),
+      "Início análise SD"  : fmtD(r[COL_SD_PRIM_RESPOSTA]),
+      "Encerramento SD"    : fmtD(r.encSD),
+      "d.u. SD aberto"     : r.diasSDAberto || 0,
+      "d.u. s/ RC (enc.)"  : r.diasDesdeEncSD || 0,
+      "Modalidade"         : r.Modalidade || "",
+      "Nº RC"              : r.NumRC || "",
+      "Tags"               : TagsManager.getForProcess(r.ProcessKey, r.TicketSD).join(", "),
+    };
+  });
+  var ws = window.XLSX.utils.json_to_sheet(clean);
+  var wb = window.XLSX.utils.book_new();
+  window.XLSX.utils.book_append_sheet(wb, ws, "Alerta Pré-compra");
+  window.XLSX.writeFile(wb, filename);
+}
+
 function exportToExcel(data, filename = "exportacao.xlsx") {
   const clean = data.map(r => ({
     "ProcessKey": r.ProcessKey, "Nº RC": r.NumRC, "Ticket Pré-compra": r.TicketSD, "Comprador": r.Comprador,
@@ -597,9 +632,10 @@ function gerarRelatorioAlertaRC({ processos, area, meta, fBase }) {
     "<script>setTimeout(function(){ window.print(); }, 400);<\/script></body></html>";
 }
 
-function gerarRelatorioAlertaSD({ sdAberto, sdEncerrado, area, meta, fBase }) {
+function gerarRelatorioAlertaSD({ sdAberto, sdEncerrado, area, meta, fBase, sdSummaries }) {
   sdAberto = sdAberto || [];
   sdEncerrado = sdEncerrado || [];
+  sdSummaries = sdSummaries || {};
   var hoje = new Date().toLocaleDateString("pt-BR", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   var hora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
   var nomeBase = meta ? meta.nomeArq : "—";
@@ -623,7 +659,7 @@ function gerarRelatorioAlertaSD({ sdAberto, sdEncerrado, area, meta, fBase }) {
   var mediaEnc = totalEnc ? Math.round(sdEncerrado.reduce(function(s,r){ return s+(r.diasDesdeEncSD||0); },0)/totalEnc) : 0;
   var areaMapEnc={};sdEncerrado.forEach(function(r){var a=r["Área Requisitante"]||"N/I";areaMapEnc[a]=(areaMapEnc[a]||0)+1;});
 
-  // ── Tabelas ──
+  // ── Tabelas de distribuição ──
   var areaTableAb = C.tbl(["Área Requisitante","Qtd"],Object.entries(areaMapAb).sort(function(a,b){return b[1]-a[1];}).map(function(e){return C.row([e[0],e[1]]);}).join(""));
   var compTableAb = C.tbl(["Responsável","Qtd"],Object.entries(compMapAb).sort(function(a,b){return b[1]-a[1];}).map(function(e){return C.row([e[0],e[1]]);}).join(""));
   var areaTableEnc = C.tbl(["Área Requisitante","Qtd"],Object.entries(areaMapEnc).sort(function(a,b){return b[1]-a[1];}).map(function(e){return C.row([e[0],e[1]]);}).join(""));
@@ -632,12 +668,40 @@ function gerarRelatorioAlertaSD({ sdAberto, sdEncerrado, area, meta, fBase }) {
   var listaAbRows = sdAberto.slice().sort(function(a,b){return (b.diasSDAberto||0)-(a.diasSDAberto||0);}).map(function(r){
     var d=r.diasSDAberto||0;
     var cor=d>prazoSD?"#c0392b":d>7?"#e67e22":"#27ae60";
-    return C.row([r.TicketSD||"—",r.respNCL||r.Comprador||"—",r["Área Requisitante"]||"—",r.Modalidade||"—",r.statusDet||r.status||"—",
-      "<span style=\"color:"+cor+";font-weight:700\">"+d+"</span>",
+    var sd=sdSummaries[String(r.TicketSD||"").trim()];
+    var duI=sd&&sd.diasDesdeUltimaInteracao!=null?sd.diasDesdeUltimaInteracao:null;
+    var duICor=duI==null?"#6b7280":duI>10?"#c0392b":duI>5?"#e67e22":"#27ae60";
+    return C.row([
+      r.TicketSD||"—",
+      r.respNCL||r.Comprador||"—",
+      r["Área Requisitante"]||"—",
+      r.statusDet||r.status||"—",
+      "<span style=\"color:"+cor+";font-weight:700\">"+d+" d.u.</span>",
       r.aberturaSD?r.aberturaSD.toLocaleDateString("pt-BR"):"—",
-      (r.Objeto||"—").slice(0,400)+((r.Objeto||"").length>400?"…":"")]);
+      sd?sd.comQuem:"—",
+      duI!=null?"<span style=\"color:"+duICor+";font-weight:700\">"+duI+" d.u.</span>":"—",
+      sd?(sd.acao||"—").slice(0,80):"—",
+      (r.Objeto||"—").slice(0,120)+((r.Objeto||"").length>120?"…":"")
+    ]);
   }).join("");
 
+  // ── Lista SD Encerrado ──
+  var listaEncRows = sdEncerrado.slice().sort(function(a,b){return (b.diasDesdeEncSD||0)-(a.diasDesdeEncSD||0);}).map(function(r){
+    var d=r.diasDesdeEncSD||0;
+    var cor=d>7?"#c0392b":d>3?"#e67e22":"#b45309";
+    var sd=sdSummaries[String(r.TicketSD||"").trim()];
+    var duI=sd&&sd.diasDesdeUltimaInteracao!=null?sd.diasDesdeUltimaInteracao:null;
+    var duICor=duI==null?"#6b7280":duI>10?"#c0392b":duI>5?"#e67e22":"#27ae60";
+    return C.row([
+      r.TicketSD||"—",
+      r["Área Requisitante"]||"—",
+      "<span style=\"color:"+cor+";font-weight:700\">"+d+" d.u.</span>",
+      r.encSD?r.encSD.toLocaleDateString("pt-BR"):"—",
+      sd?sd.comQuem:"—",
+      duI!=null?"<span style=\"color:"+duICor+";font-weight:700\">"+duI+" d.u.</span>":"—",
+      (r.Objeto||"—").slice(0,120)+((r.Objeto||"").length>120?"…":"")
+    ]);
+  }).join("");
 
   // KPI translúcido (glass) sobre o gradient
   function gKpi(label, value, valColor) {
@@ -657,9 +721,8 @@ function gerarRelatorioAlertaSD({ sdAberto, sdEncerrado, area, meta, fBase }) {
     ".notice{border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:11px}";
 
   return "<!DOCTYPE html><html lang=\"pt-BR\"><head><meta charset=\"UTF-8\"><title>Alerta Pré-compra — "+titulo+"</title><style>"+css+"</style></head><body>"+
-    // ═════════ Header gradient (mesmo padrão da tela) ═════════
+    // ═════════ Header gradient ═════════
     "<div style=\"background:linear-gradient(135deg,#064e3b 0%,#059669 100%);color:#fff;border-radius:16px;padding:24px 28px;margin-bottom:18px;box-shadow:0 4px 16px rgba(6,78,59,.18);-webkit-print-color-adjust:exact;print-color-adjust:exact\">"+
-      // Topo: título + meta
       "<div style=\"display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:18px\">"+
         "<div>"+
           "<div style=\"font-size:11px;font-weight:600;opacity:.72;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px\">Alerta Pré-compra · Tickets sem RC</div>"+
@@ -669,9 +732,7 @@ function gerarRelatorioAlertaSD({ sdAberto, sdEncerrado, area, meta, fBase }) {
         "</div>"+
         "<div style=\"font-size:10px;opacity:.7;text-align:right\">GAQ — Gerência de Aquisições · DN</div>"+
       "</div>"+
-      // Grid 2 colunas (Andamento | Encerrado)
       "<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:18px\">"+
-        // Bloco 1: Pré-compra em andamento
         "<div>"+
           "<div style=\"font-size:10px;font-weight:700;opacity:.82;letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.18)\">Pré-compra em andamento — Acompanhamento necessário GAQ</div>"+
           "<div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:10px\">"+
@@ -683,7 +744,6 @@ function gerarRelatorioAlertaSD({ sdAberto, sdEncerrado, area, meta, fBase }) {
             gKpi("Média d.u. (andamento)",mediaAb+" d.u.",mediaAb>prazoSD?"#fecaca":"#fff")+
           "</div>"+
         "</div>"+
-        // Bloco 2: Pré-compra encerrada aguardando RC
         "<div>"+
           "<div style=\"font-size:10px;font-weight:700;opacity:.82;letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.18)\">Pré-compra encerrada — Aguardando RC da Área</div>"+
           "<div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:10px\">"+
@@ -703,14 +763,16 @@ function gerarRelatorioAlertaSD({ sdAberto, sdEncerrado, area, meta, fBase }) {
         "<div style=\"flex:1;min-width:200px\">"+C.h2("Por Responsável")+compTableAb+"</div>"+
       "</div>"+
       C.h2("Lista pré-compra em andamento ("+totalAb+")")+
-      C.tbl(["Pré-compra","Responsável","Área","Modalidade","Status","d.u. pré-compra","Abertura pré-compra","Objeto"],listaAbRows)
+      C.tbl(["Pré-compra","Responsável","Área","Status","d.u. SD","Abertura SD","Com quem está","Últ. inter.","Ação necessária","Objeto"],listaAbRows)
     ) : "")+
 
     // ═════════ SEÇÃO 2: PRÉ-COMPRA ENCERRADA AGUARDANDO RC ═════════
     (totalEnc > 0 ? (
       "<div class=\"section-header\" style=\"margin-top:28px\"><div class=\"section-bar\" style=\"background:#f59e0b\"></div><div class=\"section-title\">Pré-compra encerrada — Aguardando RC</div><span class=\"section-badge\" style=\"background:#fef3c7;color:#b45309\">"+totalEnc+"</span><span style=\"font-size:11px;color:#6b7280\">Responsabilidade da Área Requisitante</span></div>"+
       "<div class=\"notice\" style=\"background:#fffbeb;border:1px solid #fde68a;color:#92400e\"><b>Cobrança à Área:</b> A pré-compra foi encerrada pelo GAQ. A Área Requisitante deve abrir a RC para dar continuidade ao processo.</div>"+
-      "<div style=\"min-width:200px;margin-bottom:8px\">"+C.h2("Por Área (pré-compra encerrada)")+areaTableEnc+"</div>"
+      "<div style=\"min-width:200px;margin-bottom:8px\">"+C.h2("Por Área (pré-compra encerrada)")+areaTableEnc+"</div>"+
+      C.h2("Lista pré-compra encerrada aguardando RC ("+totalEnc+")")+
+      C.tbl(["Pré-compra","Área","d.u. s/ RC","Enc. SD","Com quem está","Últ. inter.","Objeto"],listaEncRows)
     ) : "")+
 
     "<div style=\"text-align:center;font-size:10px;color:#aaa;margin-top:24px;border-top:1px solid #e0e7ef;padding-top:10px\">Gerado pelo Painel GAQ · "+new Date().toLocaleString("pt-BR")+"</div>"+
@@ -816,7 +878,7 @@ function buildCronograma(proc, phaseIntervals) {
     else if (slaDu == null) slaLabel = "A definir";
     else slaLabel = slaDu + " d.u.";
 
-    rows.push({ num:i+1, etapa:label, responsavel:PHASE_RESP[key]||"—",
+    rows.push({ num:i+1, key, etapa:label, responsavel:PHASE_RESP[key]||"—",
       sla: slaLabel, zone,
       planejada: planned ? planned.toLocaleDateString("pt-BR") : "—",
       real: actual ? actual.toLocaleDateString("pt-BR") : "—",
@@ -825,6 +887,28 @@ function buildCronograma(proc, phaseIntervals) {
     prevBase = (slaDu == null && !actual) ? null : (actual || planned || prevBase);
     prevZone = zone;
   }
+
+  // Reposicionar fases voláteis (Indicação Analista) na ordem cronológica do processo.
+  if (typeof VOLATILE_TIMELINE_KEYS !== "undefined") {
+    VOLATILE_TIMELINE_KEYS.forEach(volKey => {
+      const idxRow = rows.findIndex(r => r.key === volKey);
+      if (idxRow < 0) return;
+      const actualDate = pd(proc[volKey]);
+      if (!actualDate) return; // sem data → mantém posição default
+      const entry = rows[idxRow];
+      rows.splice(idxRow, 1);
+      // Inserir antes do primeiro row com data real posterior
+      let insertAt = rows.length;
+      for (let i = 0; i < rows.length; i++) {
+        const oDate = pd(proc[rows[i].key]);
+        if (oDate && oDate > actualDate) { insertAt = i; break; }
+      }
+      rows.splice(insertAt, 0, entry);
+    });
+    // Renumera após a reordenação
+    rows.forEach((r, i) => { r.num = i + 1; });
+  }
+
   return { rows, isCPL, metaTotal: meta, metaSD: PRAZO_SD, proc, dynamicSLA: !!dynamicSLA };
 }
 

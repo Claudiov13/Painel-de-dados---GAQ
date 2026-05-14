@@ -37,11 +37,14 @@ var COL_HISTORICO_CPL = "HISTORICO_CPL_FINAL";
 var COL_CPL_RECEBIDO_NCL = "RECEBIDO DO NCL EM";
 var COL_CPL_ENVIADO_DJS_CHANCELA = "ENVIADO \u00C0 DJS PARA CHANCELA EM";
 
+// Fase sint\u00E9tica \u2014 vem exclusivamente do hist\u00F3rico SD (3\u00AA intera\u00E7\u00E3o = 1\u00AA do comprador)
+var COL_SD_PRIM_RESPOSTA = "SD_PRIM_RESPOSTA_COMPRADOR";
+
 var SCONT_TIMELINE_KEYS = new Set([
   "DATA DE ENVIO DO PEDIDO (fornecedor) OU SUITE SESC (SCONT ou CPL)",
   "DATA DE RECEBIMENTO DA DEMANDA PELA ANALISTA DE CONTRATO",
   "DATA DE RECEBIMENTO NA DJ (QUANDO APLIC\u00C1VEL)",
-  "DATA DE CONCLUSAO DE CONTRATO SCONT",
+  "DATA DE ENVIO DA MINUTA ASSINADA AOS FISCAIS",
 ]);
 
 function isCplTimelineKey(key) {
@@ -59,40 +62,20 @@ function getTimelineSubareaByKey(key) {
   return "NCL";
 }
 
-// Chave da nova fase final — vai começar a ser preenchida em processos de 2025+
-var COL_CONCLUSAO_CONTRATO_SCONT = "DATA DE CONCLUSAO DE CONTRATO SCONT";
+// Chave da nova fase final
+var COL_CONCLUSAO_CONTRATO_SCONT = "DATA DE ENVIO DA MINUTA ASSINADA AOS FISCAIS";
 
-// ── Timeline LEGACY (ordem usada até 2024) ─────────────────────────────────
-// Mantida para processos abertos em 2024 (anoSD === 2024 ou anoRC === 2024)
-var TL_COLS_LEGACY = [
+// ── Timeline (ordem única para todos os processos) ─────────────────────────
+// • Recebimento DJ fixo logo após CPL: Enviado p/ DJS (segue o fluxo de chancela).
+// • Indicação Analista de Contrato — posição **default** logo após CPL: Recebido
+//   do NCL (regra de negócio: deve acontecer em até 2 d.u. depois). Por ser volátil,
+//   getOrderedTimelineEntries(proc) **reposiciona cronologicamente** quando o
+//   processo tem a data preenchida.
+// • Minuta Assinada (quando aplic.) é a fase de encerramento via Scont.
+var TL_COLS = [
   ["Abertura SD","Data da abertura do SD"],
   ["Distribuição SD","Data da distribuição do SD"],
-  ["Encerramento SD","Data do encerramento"],
-  ["Recebimento RC","DATA DO RECEBIMENTO DA RC"],
-  ["Planejamento RC","DATA DO PLANEJAMENTO DA RC"],
-  ["Início propostas","Data inicial do envio de propostas"],
-  ["Fim propostas","Data final do envio de propostas"],
-  ["Envio aprovação","Data do envio para aprovação"],
-  ["Última aprovação","Data da última aprovação"],
-  ["Envio Pedido/Suite","DATA DE ENVIO DO PEDIDO (fornecedor) OU SUITE SESC (SCONT ou CPL)"],
-  ["CPL: Recebido do NCL",COL_CPL_RECEBIDO_NCL],
-  ["CPL: Enviado p/ DJS",COL_CPL_ENVIADO_DJS_CHANCELA],
-  ["CPL: Recebimento","CPL_DATA_RECEBIMENTO_FINAL"],
-  ["CPL: Publicação","CPL_PUBLICACAO_AVISO_FINAL"],
-  ["CPL: Abertura Disputa","CPL_ABERTURA_DISPUTA_FINAL"],
-  ["CPL: Fase ext.","CPL_FINALIZACAO_FASE_EXTERNA_FINAL"],
-  ["CPL: Homologação","CPL_DATA_HOMOLOGACAO_FINAL"],
-  ["Indicação Analista de Contrato","DATA DE RECEBIMENTO DA DEMANDA PELA ANALISTA DE CONTRATO"],
-  ["Recebimento DJ","DATA DE RECEBIMENTO NA DJ (QUANDO APLICÁVEL)"],
-];
-
-// ── Timeline 2025+ (nova ordem) ────────────────────────────────────────────
-// "Indicação Analista de Contrato" vem logo após "CPL: Recebido do NCL".
-// "Recebimento DJ" vem logo após "CPL: Enviado p/ DJS".
-// Nova fase final "Conclusão Contrato (Scont)".
-var TL_COLS_2025 = [
-  ["Abertura SD","Data da abertura do SD"],
-  ["Distribuição SD","Data da distribuição do SD"],
+  ["Início análise SD", COL_SD_PRIM_RESPOSTA],
   ["Encerramento SD","Data do encerramento"],
   ["Recebimento RC","DATA DO RECEBIMENTO DA RC"],
   ["Planejamento RC","DATA DO PLANEJAMENTO DA RC"],
@@ -110,18 +93,57 @@ var TL_COLS_2025 = [
   ["CPL: Abertura Disputa","CPL_ABERTURA_DISPUTA_FINAL"],
   ["CPL: Fase ext.","CPL_FINALIZACAO_FASE_EXTERNA_FINAL"],
   ["CPL: Homologação","CPL_DATA_HOMOLOGACAO_FINAL"],
-  ["Conclusão Contrato (Scont)", COL_CONCLUSAO_CONTRATO_SCONT],
+  ["Minuta Assinada (quando aplic.)", COL_CONCLUSAO_CONTRATO_SCONT],
 ];
 
-// TL_COLS = default (usado por agregações que não têm proc específico).
-// Sempre = TL_COLS_2025 para que novas fases entrem em cálculos globais.
-var TL_COLS = TL_COLS_2025;
+// Fases voláteis — posição cronológica por processo (não fixa).
+var VOLATILE_TIMELINE_KEYS = new Set([
+  "DATA DE RECEBIMENTO DA DEMANDA PELA ANALISTA DE CONTRATO",
+]);
 
-// Retorna a ordem correta de fases para um processo específico.
-// Processos abertos em 2024 (SD ou RC) usam ordem LEGACY; demais usam 2025+.
-function getTLColsForProc(proc) {
-  if (proc && (proc.anoSD === 2024 || proc.anoRC === 2024)) return TL_COLS_LEGACY;
-  return TL_COLS_2025;
+// Retorna as entries do timeline na ordem correta para um processo específico.
+// Fases voláteis com data são reposicionadas cronologicamente entre as fixas;
+// voláteis sem data permanecem na posição default (final do fluxo).
+function getOrderedTimelineEntries(proc) {
+  var base = TL_COLS.map(function (col, idx) {
+    return {
+      label: col[0],
+      key: col[1],
+      idx: idx,
+      date: proc ? pd(proc[col[1]]) : null,
+      isCPL: isCplTimelineKey(col[1]),
+      fromHistory: !!(proc && proc._sdHistoricoDates && proc._sdHistoricoDates[col[1]]),
+    };
+  });
+  if (!proc) return base;
+
+  var stable = [];
+  var volatile = [];
+  for (var i = 0; i < base.length; i++) {
+    if (VOLATILE_TIMELINE_KEYS.has(base[i].key)) volatile.push(base[i]);
+    else stable.push(base[i]);
+  }
+
+  var result = stable.slice();
+  for (var v = 0; v < volatile.length; v++) {
+    var entry = volatile[v];
+    var insertAt;
+    if (entry.date) {
+      // Insere antes da primeira entry estável com data POSTERIOR.
+      insertAt = result.length;
+      for (var k = 0; k < result.length; k++) {
+        if (result[k].date && result[k].date > entry.date) { insertAt = k; break; }
+      }
+    } else {
+      // Sem data → posição default (mesma posição no fluxo padrão).
+      insertAt = result.length;
+      for (var k = 0; k < result.length; k++) {
+        if (result[k].idx > entry.idx) { insertAt = k; break; }
+      }
+    }
+    result.splice(insertAt, 0, entry);
+  }
+  return result;
 }
 
 var PAGE_SIZES = [20, 50, 100];
@@ -137,19 +159,16 @@ function getPrazoGeral(modNrm) {
   return PRAZO_COMPRA_DIRETA;
 }
 
-// Etapas do timeline por tipo de modalidade (índices em TL_COLS do proc).
+// Etapas do timeline por tipo de modalidade (índices em TL_COLS).
 // CPL (Pregão/Concorrência): todas as etapas.
 // Simples (Dispensa/Inexig/Adesão/Credenciamento): filtra as fases CPL pela key.
-// Aceita proc opcional para usar ordem LEGACY/2025 correta; sem proc, usa default.
-function getTLColsForMod(modNrm, proc) {
-  var cols = proc ? getTLColsForProc(proc) : TL_COLS;
+function getTLColsForMod(modNrm) {
   if (modNrm.includes("pregao") || modNrm.includes("concorrencia") || modNrm.includes("dialogo")) {
-    return cols.map(function (col, i) { return i; });
+    return TL_COLS.map(function (col, i) { return i; });
   }
-  // Simples: filtra fases CPL identificadas pela key (não pelo índice — índices mudam entre LEGACY e 2025).
-  return cols.map(function (col, i) { return { col: col, i: i }; })
-             .filter(function (x) { return !isCplTimelineKey(x.col[1]); })
-             .map(function (x) { return x.i; });
+  return TL_COLS.map(function (col, i) { return { col: col, i: i }; })
+                .filter(function (x) { return !isCplTimelineKey(x.col[1]); })
+                .map(function (x) { return x.i; });
 }
 
 // Mapa de responsabilidade por fase (baseado no fluxo SESC GAQ)
@@ -173,7 +192,8 @@ var PHASE_RESP = {
   "CPL_DATA_HOMOLOGACAO_FINAL": "GAQ / Diretoria / Presidente",
   "DATA DE RECEBIMENTO DA DEMANDA PELA ANALISTA DE CONTRATO": "GAQ",
   "DATA DE RECEBIMENTO NA DJ (QUANDO APLICÁVEL)": "DJ",
-  "DATA DE CONCLUSAO DE CONTRATO SCONT": "Scont",
+  [COL_SD_PRIM_RESPOSTA]: "GAQ",
+  [COL_CONCLUSAO_CONTRATO_SCONT]: "Scont",
 };
 
 // ── FASE SD — PRAZO APARTADO (10 d.u. total da Abertura até Encerramento) ──
@@ -191,43 +211,58 @@ var SLA_SD = {
 // Fases SD não estão incluídas — têm prazo apartado de 10 d.u.
 
 // Pregão e Concorrência — meta 90 d.u. a partir do Recebimento RC
+// Ordem segue TL_COLS:
+//   Envio Pedido/Suite → CPL: Recebido NCL → Indicação Analista (2 d.u. cap)
+//   → CPL: Enviado p/ DJS → Recebimento DJ → ciclo CPL
+// Indicação Analista tem cap fixo de 2 d.u. (regra de negócio). O excedente
+// histórico é redistribuído proporcionalmente em buildDynamicSLA().
 var SLA_CPL = {
   "DATA DO RECEBIMENTO DA RC": 0,                                                     // Marco zero do SLA
   "DATA DO PLANEJAMENTO DA RC": 3,
-  "Data inicial do envio de propostas": 7,
-  "Data final do envio de propostas": 15,
+  "Data inicial do envio de propostas": 8,    // 7 → 8 (+1)
+  "Data final do envio de propostas": 16,     // 15 → 16 (+1)
   "Data do envio para aprovação": 3,
   "Data da última aprovação": 5,
   "DATA DE ENVIO DO PEDIDO (fornecedor) OU SUITE SESC (SCONT ou CPL)": 2,
   [COL_CPL_RECEBIDO_NCL]: null,
+  "DATA DE RECEBIMENTO DA DEMANDA PELA ANALISTA DE CONTRATO": 2,                       // cap fixo (era 5)
   [COL_CPL_ENVIADO_DJS_CHANCELA]: null,
+  "DATA DE RECEBIMENTO NA DJ (QUANDO APLICÁVEL)": 7,
   "CPL_DATA_RECEBIMENTO_FINAL": 2,
   "CPL_PUBLICACAO_AVISO_FINAL": 5,
-  "CPL_ABERTURA_DISPUTA_FINAL": 12,
+  "CPL_ABERTURA_DISPUTA_FINAL": 13,           // 12 → 13 (+1)
   "CPL_FINALIZACAO_FASE_EXTERNA_FINAL": 12,
   "CPL_DATA_HOMOLOGACAO_FINAL": 12,
-  "DATA DE RECEBIMENTO DA DEMANDA PELA ANALISTA DE CONTRATO": 5,
-  "DATA DE RECEBIMENTO NA DJ (QUANDO APLICÁVEL)": 7,
+  [COL_CONCLUSAO_CONTRATO_SCONT]: null,
 };
-// Fallback total CPL: 3+7+15+3+5+2+2+5+12+12+12+5+7 = 90
+// Fallback total CPL: 3+8+16+3+5+2+2+7+2+5+13+12+12 = 90
 
 // Demais modalidades (Dispensa, Inexigibilidade, Credenciamento, Adesão ARP) — meta 30 d.u. a partir do Recebimento RC
 var SLA_SIMPLES = {
   "DATA DO RECEBIMENTO DA RC": 0,                                                     // Marco zero do SLA
   "DATA DO PLANEJAMENTO DA RC": 2,
   "Data inicial do envio de propostas": 4,
-  "Data final do envio de propostas": 8,
+  "Data final do envio de propostas": 9,                                               // 8 → 9 (+1)
   "Data do envio para aprovação": 3,
   "Data da última aprovação": 5,
   "DATA DE ENVIO DO PEDIDO (fornecedor) OU SUITE SESC (SCONT ou CPL)": 3,
-  "DATA DE RECEBIMENTO DA DEMANDA PELA ANALISTA DE CONTRATO": 3,
+  "DATA DE RECEBIMENTO DA DEMANDA PELA ANALISTA DE CONTRATO": 2,                       // cap fixo (era 3)
   "DATA DE RECEBIMENTO NA DJ (QUANDO APLICÁVEL)": 2,
+  [COL_CONCLUSAO_CONTRATO_SCONT]: null,
 };
-// Fallback total Simples: 2+4+8+3+5+3+3+2 = 30
+// Fallback total Simples: 2+4+9+3+5+3+2+2 = 30
 
 // ── SLA DINÂMICO — calcula SLA por fase a partir do histórico real ──
 // Pega as médias históricas de cada intervalo e redistribui proporcionalmente
-// para que o total a partir do Recebimento RC = meta (90 ou 30 d.u.)
+// para que o total a partir do Recebimento RC = meta (90 ou 30 d.u.).
+//
+// Regras fixas (não participam da redistribuição proporcional):
+//   • Indicação Analista de Contrato: CAP fixo de 2 d.u. (regra de negócio).
+//     O excedente histórico é redistribuído nas demais fases proporcionalmente
+//     ao peso histórico delas.
+var INDICACAO_ANALISTA_KEY = "DATA DE RECEBIMENTO DA DEMANDA PELA ANALISTA DE CONTRATO";
+var INDICACAO_ANALISTA_CAP_DU = 2;
+
 function buildDynamicSLA(phaseIntervals, modNrm) {
   if (!phaseIntervals || !phaseIntervals.global) return null;
   var isCPL = modNrm.includes("pregao") || modNrm.includes("concorrencia") || modNrm.includes("dialogo");
@@ -258,37 +293,54 @@ function buildDynamicSLA(phaseIntervals, modNrm) {
     var iv = (modIntervals && modIntervals[pair] && modIntervals[pair].avg) ? modIntervals[pair]
              : (phaseIntervals.global[pair] ? phaseIntervals.global[pair] : null);
     var fallback = baseSLA[keyB];
-    intervals.push({ keyA: keyA, keyB: keyB, avg: iv ? iv.avg : fallback, n: iv ? iv.n : 0, fallback: fallback });
+    var isFixed = (keyB === INDICACAO_ANALISTA_KEY);
+    intervals.push({
+      keyA: keyA,
+      keyB: keyB,
+      avg: iv ? iv.avg : fallback,
+      n: iv ? iv.n : 0,
+      fallback: fallback,
+      fixed: isFixed ? INDICACAO_ANALISTA_CAP_DU : null,
+    });
   }
 
-  // Remover entradas com avg null (CPL null entries)
-  var withAvg = intervals.filter(function(x) { return x.avg != null && x.avg > 0; });
+  // Soma dos d.u. fixos (Indicação Analista) — não participa da redistribuição
+  var fixedSum = intervals.reduce(function (s, x) { return s + (x.fixed || 0); }, 0);
+  // Meta restante a distribuir entre as fases dinâmicas
+  var dynamicMeta = Math.max(1, meta - fixedSum);
+
+  // Entradas com avg disponível e que NÃO são fixed
+  var withAvg = intervals.filter(function(x) { return x.avg != null && x.avg > 0 && x.fixed == null; });
   if (withAvg.length === 0) return null;
 
-  // Soma das médias históricas
+  // Soma das médias históricas (apenas das dinâmicas)
   var totalHist = withAvg.reduce(function(s, x) { return s + x.avg; }, 0);
   if (totalHist === 0) return null;
 
-  // Redistribuir proporcionalmente para somar = meta
+  // Redistribuir proporcionalmente para somar = dynamicMeta (excluindo o cap fixo)
   var result = {};
   result[keys[0]] = 0; // Marco zero (Recebimento RC)
   for (var i = 0; i < intervals.length; i++) {
     var iv = intervals[i];
-    if (iv.avg == null) {
-      result[iv.keyB] = null; // CPL null entries mantêm null
+    if (iv.fixed != null) {
+      result[iv.keyB] = iv.fixed;                // cap fixo de 2 d.u.
+    } else if (iv.avg == null) {
+      result[iv.keyB] = null;                    // CPL null entries mantêm null
     } else {
-      result[iv.keyB] = Math.max(1, Math.round((iv.avg / totalHist) * meta));
+      result[iv.keyB] = Math.max(1, Math.round((iv.avg / totalHist) * dynamicMeta));
     }
   }
 
-  // Ajustar para que a soma exata = meta
+  // Ajustar para que a soma exata = meta (sem mexer no cap fixo)
   var valKeys = Object.keys(result).filter(function(k) { return result[k] != null && result[k] > 0; });
   var sum = valKeys.reduce(function(s, k) { return s + result[k]; }, 0);
   var diff = meta - sum;
   if (diff !== 0 && valKeys.length > 0) {
-    // Ajusta na maior fase
-    var maxKey = valKeys.reduce(function(a, b) { return result[a] >= result[b] ? a : b; });
-    result[maxKey] = Math.max(1, result[maxKey] + diff);
+    var dynamicKeys = valKeys.filter(function (k) { return k !== INDICACAO_ANALISTA_KEY; });
+    if (dynamicKeys.length > 0) {
+      var maxKey = dynamicKeys.reduce(function(a, b) { return result[a] >= result[b] ? a : b; });
+      result[maxKey] = Math.max(1, result[maxKey] + diff);
+    }
   }
 
   return result;
