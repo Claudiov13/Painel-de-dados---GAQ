@@ -281,9 +281,14 @@ const DrillDownPanel = ({
 
   const sourceAba = drillDown.sourceAba || defaultSourceAba;
   const accent = drillDown.color || "var(--gaq-blue)";
-  const total = drillDown.data.length;
+  const sortedData = [...drillDown.data].sort((a, b) => {
+    const at = a.diasTotais || a.diasSDAberto || a.diasDesdeEncSD || 0;
+    const bt = b.diasTotais || b.diasSDAberto || b.diasDesdeEncSD || 0;
+    return bt - at;
+  });
+  const total = sortedData.length;
   const start = (pgDrillDown - 1) * pgDrillDownSz;
-  const rows = drillDown.data.slice(start, start + pgDrillDownSz);
+  const rows = sortedData.slice(start, start + pgDrillDownSz);
   const backLabel = sourceAba === "operacional"
     ? "ao Operacional"
     : sourceAba === "gestao"
@@ -553,6 +558,208 @@ const TagModal = ({ proc, onClose, onUpdate }) => {
         </div>
         <div style={{ padding: "10px 20px", borderTop: "1px solid var(--border)", textAlign: "right" }}>
           <button onClick={onClose} style={{ padding: "7px 20px", borderRadius: 6, background: "var(--card2)", border: "1px solid var(--border)", color: "var(--text)", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Fechar</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const EmailDiarioModal = ({ alertSDAberto, fBase, serviceDeskData, onClose }) => {
+  const [cpStatus, setCpStatus] = React.useState("");
+  const MARCIO_EMAIL = "mmarcenal@sesc.com.br";
+  const hoje = new Date();
+  const ontem = new Date(hoje); ontem.setDate(ontem.getDate() - 1);
+  const hojeStr   = hoje.toLocaleDateString("pt-BR", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
+  const ontemStr  = ontem.toLocaleDateString("pt-BR", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
+  const ontemSimples = ontem.toLocaleDateString("pt-BR");
+  const isD1 = d => d instanceof Date && d.toDateString() === ontem.toDateString();
+  const fmtD = d => d instanceof Date ? d.toLocaleDateString("pt-BR") : "—";
+  const esc  = s => String(s||"—").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+
+  const rcHoje  = (fBase||[]).filter(r => r.aberturaRC && isD1(r.aberturaRC) && !r.isCanceled && !r.isFailed);
+  const sdHoje  = (alertSDAberto||[]).filter(r => r.aberturaSD && isD1(r.aberturaSD));
+
+  const sdRows = sdHoje.map(r => {
+    const sdRec  = getServiceDeskRecord(r.TicketSD, serviceDeskData);
+    const sdCli  = sdRec ? cleanServiceDeskObject(sdRec.informacoes_do_cliente || {}) : {};
+    const sdInfo = sdRec ? cleanServiceDeskObject(sdRec.informacoes_do_chamado  || {}) : {};
+    const sdSum  = getServiceDeskAlertSummary(r, serviceDeskData);
+    return {
+      ticket   : r.TicketSD || "—",
+      abertura : fmtD(r.aberturaSD),
+      objeto   : (r.Objeto || "—").slice(0, 100),
+      status   : sdSum ? sdSum.estado : (sdInfo.estado || "—"),
+      area     : r["Área Requisitante"] || "—",
+      avaliador: r.Avaliador || "—",
+      cliente  : [sdCli.nome, sdCli.sobrenome].filter(Boolean).join(" ") || "—",
+    };
+  });
+
+  const rcRows = rcHoje.map(r => ({
+    numRC   : r.NumRC || "—",
+    abertura: fmtD(r.aberturaRC),
+    objeto  : (r.Objeto || "—").slice(0, 100),
+    status  : r.statusDet || r.status || "—",
+    area    : r["Área Requisitante"] || "—",
+    comprador: r.Comprador || r.respNCL || "—",
+  }));
+
+  const TH = "padding:8px 10px;background:#0f3d5e;color:#fff;font-size:11px;font-weight:700;text-align:left;border:1px solid #0a2d44";
+  const TD = "padding:6px 10px;border:1px solid #dbe3ee;font-size:11px;vertical-align:top;color:#1d1d1f";
+  const TBL = "width:100%;border-collapse:collapse;margin-bottom:24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";
+
+  const buildHtmlEmail = () => {
+    const sdHtml = sdRows.length
+      ? `<table style="${TBL}"><thead><tr>
+           <th style="${TH}">Ticket SD</th><th style="${TH}">Abertura</th><th style="${TH}">Objeto</th>
+           <th style="${TH}">Status</th><th style="${TH}">Área Requisitante</th><th style="${TH}">Avaliador</th><th style="${TH}">Cliente</th>
+         </tr></thead><tbody>
+         ${sdRows.map((r,i) => `<tr style="background:${i%2===0?'#fff':'#f9fafb'}">
+           <td style="${TD}">${esc(r.ticket)}</td><td style="${TD}" nowrap>${esc(r.abertura)}</td>
+           <td style="${TD}">${esc(r.objeto)}</td><td style="${TD}">${esc(r.status)}</td>
+           <td style="${TD}">${esc(r.area)}</td><td style="${TD}">${esc(r.avaliador)}</td><td style="${TD}">${esc(r.cliente)}</td>
+         </tr>`).join("")}
+         </tbody></table>`
+      : `<p style="color:#6b7280;font-size:12px">Nenhum ticket aberto nessa data em andamento.</p>`;
+
+    const rcHtml = rcRows.length
+      ? `<table style="${TBL}"><thead><tr>
+           <th style="${TH}">Nº RC</th><th style="${TH}">Recebimento RC</th><th style="${TH}">Objeto</th>
+           <th style="${TH}">Status</th><th style="${TH}">Área Requisitante</th><th style="${TH}">Comprador</th>
+         </tr></thead><tbody>
+         ${rcRows.map((r,i) => `<tr style="background:${i%2===0?'#fff':'#f9fafb'}">
+           <td style="${TD}">${esc(r.numRC)}</td><td style="${TD}" nowrap>${esc(r.abertura)}</td>
+           <td style="${TD}">${esc(r.objeto)}</td><td style="${TD}">${esc(r.status)}</td>
+           <td style="${TD}">${esc(r.area)}</td><td style="${TD}">${esc(r.comprador)}</td>
+         </tr>`).join("")}
+         </tbody></table>`
+      : `<p style="color:#6b7280;font-size:12px">Nenhuma RC recebida nessa data.</p>`;
+
+    return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1d1d1f;max-width:1020px">
+      <p>Prezado Márcio,</p>
+      <p>Segue o acompanhamento diário da GAQ referente a <strong>${ontemStr}</strong> (D-1).</p>
+      <h3 style="font-size:13px;color:#0f3d5e;border-left:4px solid #2e86c1;padding-left:8px;margin:20px 0 10px">
+        Pré-compra SD — abertas em ${ontemSimples} (${sdRows.length})
+      </h3>
+      ${sdHtml}
+      <h3 style="font-size:13px;color:#0f3d5e;border-left:4px solid #27ae60;padding-left:8px;margin:20px 0 10px">
+        RCs recebidas em ${ontemSimples} (${rcRows.length})
+      </h3>
+      ${rcHtml}
+      <p style="font-size:11px;color:#6b7280;border-top:1px solid #e5e7eb;padding-top:10px;margin-top:20px">
+        Gerado pelo Painel GAQ · ${hojeStr}
+      </p>
+    </div>`;
+  };
+
+  const copiarEEnviar = async () => {
+    const html = buildHtmlEmail();
+    try {
+      const blob = new Blob([html], { type: "text/html" });
+      await navigator.clipboard.write([new ClipboardItem({ "text/html": blob })]);
+      setCpStatus("copiado");
+    } catch {
+      setCpStatus("erro");
+    }
+    const subject = `Acompanhamento GAQ — D-1: ${ontemSimples} · SD: ${sdRows.length} · RC: ${rcRows.length}`;
+    const body    = `Prezado Márcio,\n\nSegue o acompanhamento diário da GAQ referente a ${ontemStr} (D-1).\n\n• Pré-compra SD abertas em ${ontemSimples}: ${sdRows.length}\n• RCs recebidas em ${ontemSimples}: ${rcRows.length}\n\n(Cole o conteúdo HTML copiado neste corpo de e-mail para exibir as tabelas formatadas.)\n\nAtenciosamente,\nGAQ — Gerência de Aquisições · DN`;
+    setTimeout(() => {
+      const a = document.createElement("a");
+      a.href = `mailto:${MARCIO_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      a.click();
+      setTimeout(() => setCpStatus(""), 3000);
+    }, 200);
+  };
+
+  const thStyle = { padding:"7px 10px", background:"#0f3d5e", color:"#fff", fontSize:10, fontWeight:700, textAlign:"left", borderRight:"1px solid #1a5276", whiteSpace:"nowrap" };
+  const tdStyle = { padding:"5px 9px", fontSize:11, borderBottom:"1px solid var(--gaq-line)", verticalAlign:"top", color:"var(--gaq-text)", lineHeight:1.35 };
+  const tblStyle = { width:"100%", borderCollapse:"collapse", marginBottom:20 };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(15,23,42,.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2200, padding:16 }} onClick={onClose}>
+      <div style={{ background:"var(--gaq-surface)", borderRadius:14, width:"min(1020px,98vw)", maxHeight:"92vh", display:"flex", flexDirection:"column", boxShadow:"0 12px 48px rgba(0,0,0,.25)", border:"1px solid var(--gaq-line)" }} onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div style={{ padding:"18px 24px", background:"linear-gradient(135deg,#0f3d5e,#1a5276)", color:"#fff", borderRadius:"14px 14px 0 0", display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexShrink:0 }}>
+          <div>
+            <div style={{ fontSize:10, opacity:.72, textTransform:"uppercase", letterSpacing:".05em", marginBottom:4 }}>Email Diário · GAQ — Gerência de Aquisições · DN</div>
+            <div style={{ fontSize:18, fontWeight:700, letterSpacing:"-.01em" }}>D-1 · {ontemStr}</div>
+            <div style={{ fontSize:11, opacity:.65, marginTop:2 }}>Gerado em {hojeStr}</div>
+            <div style={{ fontSize:12, opacity:.82, marginTop:6, display:"flex", gap:16, flexWrap:"wrap" }}>
+              <span>Pré-compra SD abertas em {ontemSimples}: <b>{sdRows.length}</b></span>
+              <span>RCs abertas em {ontemSimples}: <b>{rcRows.length}</b></span>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background:"rgba(255,255,255,.12)", border:"1px solid rgba(255,255,255,.25)", color:"#fff", fontSize:18, cursor:"pointer", borderRadius:8, width:34, height:34, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, marginLeft:14 }}>×</button>
+        </div>
+
+        {/* Body — tabelas de preview */}
+        <div style={{ overflow:"auto", padding:"20px 24px", flex:1 }}>
+
+          {/* Tabela SD */}
+          <div style={{ fontSize:12, fontWeight:700, color:"#0f3d5e", borderLeft:"4px solid #2e86c1", paddingLeft:8, marginBottom:10 }}>
+            Pré-compra SD — abertas em {ontemSimples} ({sdRows.length})
+          </div>
+          {sdRows.length > 0 ? (
+            <div style={{ overflowX:"auto", marginBottom:20 }}>
+              <table style={tblStyle}>
+                <thead>
+                  <tr>{["Ticket SD","Abertura","Objeto","Status","Área Requisitante","Avaliador","Cliente"].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {sdRows.map((r,i) => (
+                    <tr key={r.ticket} style={{ background: i%2===0 ? "var(--gaq-bg-2)" : "var(--gaq-surface)" }}>
+                      <td style={{ ...tdStyle, fontWeight:700, whiteSpace:"nowrap" }}>{r.ticket}</td>
+                      <td style={{ ...tdStyle, whiteSpace:"nowrap" }}>{r.abertura}</td>
+                      <td style={{ ...tdStyle, maxWidth:220 }}>{r.objeto}</td>
+                      <td style={{ ...tdStyle, whiteSpace:"nowrap" }}>{r.status}</td>
+                      <td style={tdStyle}>{r.area}</td>
+                      <td style={{ ...tdStyle, whiteSpace:"nowrap" }}>{r.avaliador}</td>
+                      <td style={{ ...tdStyle, whiteSpace:"nowrap" }}>{r.cliente}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : <div style={{ fontSize:11, color:"var(--gaq-text-3)", marginBottom:20 }}>Nenhum ticket aberto nessa data em andamento.</div>}
+
+          {/* Tabela RC */}
+          <div style={{ fontSize:12, fontWeight:700, color:"#0f3d5e", borderLeft:"4px solid #27ae60", paddingLeft:8, marginBottom:10 }}>
+            RCs recebidas em {ontemSimples} ({rcRows.length})
+          </div>
+          {rcRows.length > 0 ? (
+            <div style={{ overflowX:"auto" }}>
+              <table style={tblStyle}>
+                <thead>
+                  <tr>{["Nº RC","Recebimento RC","Objeto","Status","Área Requisitante","Comprador"].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {rcRows.map((r,i) => (
+                    <tr key={r.numRC + i} style={{ background: i%2===0 ? "var(--gaq-bg-2)" : "var(--gaq-surface)" }}>
+                      <td style={{ ...tdStyle, fontWeight:700, whiteSpace:"nowrap" }}>{r.numRC}</td>
+                      <td style={{ ...tdStyle, whiteSpace:"nowrap" }}>{r.abertura}</td>
+                      <td style={{ ...tdStyle, maxWidth:220 }}>{r.objeto}</td>
+                      <td style={tdStyle}>{r.status}</td>
+                      <td style={tdStyle}>{r.area}</td>
+                      <td style={{ ...tdStyle, whiteSpace:"nowrap" }}>{r.comprador}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : <div style={{ fontSize:11, color:"var(--gaq-text-3)" }}>Nenhuma RC recebida nessa data.</div>}
+        </div>
+
+        {/* Footer — ações */}
+        <div style={{ padding:"14px 24px", borderTop:"1px solid var(--gaq-line)", display:"flex", gap:10, alignItems:"center", flexShrink:0, background:"var(--gaq-bg-2)", borderRadius:"0 0 14px 14px" }}>
+          <button onClick={copiarEEnviar}
+            style={{ background: cpStatus === "copiado" ? "#059669" : "#0f3d5e", color:"#fff", border:"none", borderRadius:8, padding:"10px 20px", cursor:"pointer", fontSize:12, fontWeight:700, display:"flex", alignItems:"center", gap:7, transition:"all .2s" }}>
+            {cpStatus === "copiado" ? "✓ Copiado! Outlook aberto — cole no corpo do e-mail" : cpStatus === "erro" ? "⚠ Copie manualmente e abra o Outlook" : "✉ Copiar tabelas e abrir Outlook"}
+          </button>
+          <div style={{ fontSize:10, color:"var(--gaq-text-3)", flex:1 }}>
+            Copia o conteúdo HTML formatado para a área de transferência e abre o Outlook com o destinatário e assunto preenchidos. Cole (Ctrl+V) no corpo do e-mail.
+          </div>
+          <button onClick={onClose} style={{ background:"transparent", border:"1px solid var(--gaq-line)", borderRadius:8, padding:"9px 16px", cursor:"pointer", fontSize:11, color:"var(--gaq-text-3)" }}>Fechar</button>
         </div>
       </div>
     </div>
@@ -1758,6 +1965,7 @@ useEffect(() => {
   const [pgPantanal, setPgPantanal] = useState(1);
   const [pgPantanalSz, setPgPantanalSz] = useState(50);
   const [pantanalSel, setPantanalSel] = useState(null);
+  const [showEmailDiario, setShowEmailDiario] = useState(false);
   const [pantanalBusca, setPantanalBusca] = useState("");
   const [topMenuOpen, setTopMenuOpen] = useState(false);
   const [busca, setBusca] = useState("");
@@ -1796,8 +2004,10 @@ useEffect(() => {
   const [pgAlertSD, setPgAlertSD] = useState(1); const [pgAlertSDSz, setPgAlertSDSz] = useState(20);
   const [pgAlertSDEnc, setPgAlertSDEnc] = useState(1); const [pgAlertSDEncSz, setPgAlertSDEncSz] = useState(20);
   const [sdCopyStatus, setSdCopyStatus] = useState("");
+  const [distAnosFilter, setDistAnosFilter] = useState(null); // null = auto (ano mais recente)
   const [pgAll, setPgAll] = useState(1); const [pgAllSz, setPgAllSz] = useState(50);
   const [sortAll, setSortAll] = useState({ col: "diasTotais", dir: "desc" });
+  const [hideSDConcluido, setHideSDConcluido] = useState(false);
 
   // ── IA Insights (Gemini) — chave carregada via apikey.js (gitignored) ──
   const iaDisponivel = !!(typeof window !== "undefined" && window.IA_API_KEY);
@@ -3511,6 +3721,7 @@ const topModLentas = (() => {
 
   const allProcesses = useMemo(() => {
     let arr = [...fBase];
+    if (hideSDConcluido) arr = arr.filter(r => !nrm(r.statusDet || r.status || "").includes("service desk concluido"));
     const { col, dir } = sortAll;
     arr.sort((a, b) => {
       let va = a[col], vb = b[col];
@@ -3521,7 +3732,7 @@ const topModLentas = (() => {
       return dir === "desc" ? (vb > va ? 1 : vb < va ? -1 : 0) : (va > vb ? 1 : va < vb ? -1 : 0);
     });
     return arr;
-  }, [fBase, sortAll]);
+  }, [fBase, sortAll, hideSDConcluido]);
 
   const allPage = useMemo(() => allProcesses.slice((pgAll-1)*pgAllSz, pgAll*pgAllSz), [allProcesses, pgAll, pgAllSz]);
 
@@ -6897,6 +7108,9 @@ GAQ — Gerência de Aquisições`;
               }} title="Gerar um PDF separado por área">
                 <Icon name="download" size={14}/> PDF por Áreas
               </button>
+              <button className="gaq-btn no-print" onClick={() => setShowEmailDiario(true)} title="Gerar e-mail diário para o Marcio com SD e RCs de hoje">
+                <Icon name="external" size={14}/> Email Diário Marcio
+              </button>
             </div>
           </div>
 
@@ -7204,6 +7418,269 @@ GAQ — Gerência de Aquisições`;
               );
             })()}
 
+            {/* ── Distribuição por comprador e modalidade / ano ── */}
+            {(() => {
+              const shortName = name => { const p = (name||"").trim().split(/\s+/); return p.length > 1 ? `${p[0]} ${p[p.length-1]}` : p[0]; };
+              const truncate  = (s, n) => s.length > n ? s.slice(0, n-1) + "…" : s;
+
+              // Acumular dados por ano para compradores e modalidades
+              const anoCompMap = {};
+              const anoModMap  = {};
+              fBase.forEach(r => {
+                if (r.isCanceled || r.isFailed) return;
+                const dataRef = r.aberturaSD || r.aberturaRC;
+                if (!dataRef || !(dataRef instanceof Date)) return;
+                const ano  = String(dataRef.getFullYear());
+                const _validResp = v => { if (!v) return false; const n = nrm(v.trim()); return n && n !== "n/a" && n !== "n/i" && !n.includes("nao aplic") && !n.includes("não aplic"); };
+                const comp = (_validResp(r.Comprador) ? r.Comprador : _validResp(r.Avaliador) ? r.Avaliador : "Sem responsável").trim();
+                const mod  = (r.Modalidade || "N/I").trim();
+                if (!anoCompMap[ano]) anoCompMap[ano] = {};
+                anoCompMap[ano][comp] = (anoCompMap[ano][comp] || 0) + 1;
+                if (!anoModMap[ano]) anoModMap[ano] = {};
+                anoModMap[ano][mod]  = (anoModMap[ano][mod]  || 0) + 1;
+              });
+
+              const allAnos    = [...new Set([...Object.keys(anoCompMap), ...Object.keys(anoModMap)])].sort();
+              if (allAnos.length === 0) return null;
+              const recentAnos = allAnos.slice(-5); // últimos 5 anos para navegação
+              const anoMaisRecente = recentAnos[recentAnos.length - 1];
+
+              // displayAnos: null → apenas o mais recente; array → seleção explícita
+              const displayAnos = distAnosFilter === null ? [anoMaisRecente] : distAnosFilter;
+
+              // Paleta fixa por posição dentro de recentAnos
+              const YEAR_PAL = ["#94a3b8","#64748b","#2e86c1","#059669","#d35400"];
+              const anoColor   = ano => YEAR_PAL[recentAnos.indexOf(ano)] ?? "#94a3b8";
+              const anoAtivo   = ano => displayAnos.includes(ano);
+
+              const toggleAno = ano => {
+                const atual = distAnosFilter === null ? [anoMaisRecente] : distAnosFilter;
+                const novo  = anoAtivo(ano) ? atual.filter(a => a !== ano) : [...atual, ano].sort();
+                setDistAnosFilter(novo.length === 0 ? [ano] : novo);
+              };
+
+              // ── Compradores ──
+              // totais históricos (todos os recentAnos) → usados nas pills e no total do subtítulo
+              const buyerTotalsAll = {};
+              recentAnos.forEach(ano => Object.entries(anoCompMap[ano]||{}).forEach(([c,n]) => { buyerTotalsAll[c]=(buyerTotalsAll[c]||0)+n; }));
+              const buyerTotal = Object.values(buyerTotalsAll).reduce((a,b)=>a+b,0);
+
+              // totais dos anos selecionados → determinam quem entra no top e a ordenação
+              const buyerTotalsDisplay = {};
+              displayAnos.forEach(ano => Object.entries(anoCompMap[ano]||{}).forEach(([c,n]) => { buyerTotalsDisplay[c]=(buyerTotalsDisplay[c]||0)+n; }));
+              const topBuyers = Object.entries(buyerTotalsDisplay).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([n])=>n);
+
+              const buyerData  = topBuyers.map(b => {
+                const row = { name: shortName(b) };
+                recentAnos.forEach(ano => { row[ano] = (anoCompMap[ano]||{})[b] || 0; });
+                row._tot = displayAnos.reduce((s,a)=>s+(row[a]||0),0); // ordena pelo período exibido
+                return row;
+              }).sort((a,b)=>b._tot-a._tot);
+
+              // ── Modalidades ──
+              // mesmo padrão: totais históricos para pills, totais do período para ranking
+              const modTotalsAll = {};
+              recentAnos.forEach(ano => Object.entries(anoModMap[ano]||{}).forEach(([m,n]) => { modTotalsAll[m]=(modTotalsAll[m]||0)+n; }));
+              const modTotal = Object.values(modTotalsAll).reduce((a,b)=>a+b,0);
+
+              const modTotalsDisplay = {};
+              displayAnos.forEach(ano => Object.entries(anoModMap[ano]||{}).forEach(([m,n]) => { modTotalsDisplay[m]=(modTotalsDisplay[m]||0)+n; }));
+              const topMods = Object.entries(modTotalsDisplay).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([n])=>n);
+
+              const modData  = topMods.map(m => {
+                const row = { name: truncate(m, 30) };
+                recentAnos.forEach(ano => { row[ano] = (anoModMap[ano]||{})[m] || 0; });
+                row._tot = displayAnos.reduce((s,a)=>s+(row[a]||0),0);
+                return row;
+              }).sort((a,b)=>b._tot-a._tot);
+
+              const BAR_H  = 11;
+              const ROW_H  = displayAnos.length * (BAR_H + 3) + 18;
+              const bChartH = Math.max(160, buyerData.length * ROW_H + 20);
+              const mChartH = Math.max(160, modData.length  * ROW_H + 20);
+              const YW_B = 88, YW_M = 110;
+
+              // Seletor de anos compartilhado
+              const YearLegend = () => (
+                <div style={{ display:"flex", gap:5, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
+                  {recentAnos.map(ano => {
+                    const ativo = anoAtivo(ano);
+                    const cor   = anoColor(ano);
+                    const isLatest = ano === anoMaisRecente;
+                    return (
+                      <button key={ano} onClick={() => toggleAno(ano)}
+                        style={{ display:"flex", alignItems:"center", gap:5, padding:"4px 10px", borderRadius:20, cursor:"pointer", fontSize:11, fontWeight:700, border:`1.5px solid ${ativo ? cor : "var(--gaq-line)"}`, background: ativo ? cor : "var(--gaq-bg-2)", color: ativo ? "#fff" : "var(--gaq-text-3)", transition:"all .15s", position:"relative" }}>
+                        {ano}
+                        {isLatest && !ativo && <span style={{ fontSize:8, color:"var(--gaq-text-3)", fontWeight:400, marginLeft:2 }}>↩</span>}
+                      </button>
+                    );
+                  })}
+                  <button onClick={() => setDistAnosFilter(recentAnos.slice())}
+                    style={{ padding:"4px 10px", borderRadius:20, cursor:"pointer", fontSize:11, fontWeight:600, border:"1.5px solid var(--gaq-line)", background:"var(--gaq-bg-2)", color:"var(--gaq-text-3)", transition:"all .15s" }}>
+                    Todos
+                  </button>
+                  {distAnosFilter !== null && displayAnos.length < recentAnos.length && (
+                    <button onClick={() => setDistAnosFilter(null)}
+                      style={{ padding:"4px 10px", borderRadius:20, cursor:"pointer", fontSize:10, border:"none", background:"transparent", color:"var(--gaq-text-3)", textDecoration:"underline" }}>
+                      resetar
+                    </button>
+                  )}
+                </div>
+              );
+
+              const Pills = ({ items, totals, total, labelFn }) => (
+                <div style={{ marginTop:12, display:"flex", flexWrap:"wrap", gap:5 }}>
+                  {items.map(item => {
+                    const tot = totals[item]||0;
+                    const pct = total>0 ? Math.round((tot/total)*100) : 0;
+                    return (
+                      <div key={item} style={{ display:"flex", alignItems:"center", gap:4, background:"var(--gaq-bg-2)", borderRadius:6, padding:"2px 8px", fontSize:10, border:"1px solid var(--gaq-line)" }}>
+                        <span style={{ color:"var(--gaq-text-2)" }}>{labelFn ? labelFn(item) : truncate(item,22)}</span>
+                        <span style={{ fontWeight:700, color:"var(--gaq-text)" }}>{tot}</span>
+                        <span style={{ color:"var(--gaq-text-3)" }}>({pct}%)</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+
+              const commonTooltip = {
+                contentStyle:{ background:"var(--gaq-surface)", border:"1px solid var(--gaq-line)", borderRadius:8, fontSize:11, boxShadow:"0 4px 16px rgba(0,0,0,.08)" },
+                cursor:{ fill:"var(--gaq-bg-2)" },
+                formatter:(v, name) => [v||null, name],
+              };
+
+              return (
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:16 }}>
+
+                  {/* ─ Card: Por Comprador ─ */}
+                  <div className="gaq-card" style={{ padding:22, borderRadius:24 }}>
+                    <div style={{ fontWeight:700, fontSize:15, color:"var(--gaq-text)", marginBottom:2 }}>Distribuição por comprador</div>
+                    <div style={{ fontSize:11, color:"var(--gaq-text-3)", marginBottom:10 }}>
+                      Processos encaminhados · data ref.: abertura SD ou RC · <b style={{ color:"var(--gaq-text-2)" }}>{buyerTotal}</b> total
+                    </div>
+                    <YearLegend />
+                    <Recharts.ResponsiveContainer width="100%" height={bChartH}>
+                      <Recharts.BarChart layout="vertical" data={buyerData}
+                        margin={{ top:0, right:28, left:0, bottom:0 }}
+                        barCategoryGap="22%" barGap={2}>
+                        <Recharts.CartesianGrid strokeDasharray="3 3" stroke="var(--gaq-line)" horizontal={false} />
+                        <Recharts.XAxis type="number" fontSize={9} tick={{ fill:"var(--gaq-text-3)" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                        <Recharts.YAxis type="category" dataKey="name" width={YW_B} fontSize={10} tick={{ fill:"var(--gaq-text)", fontWeight:500 }} axisLine={false} tickLine={false} />
+                        <Recharts.Tooltip {...commonTooltip} />
+                        {displayAnos.map(ano => (
+                          <Recharts.Bar key={ano} dataKey={ano} fill={anoColor(ano)} barSize={BAR_H} radius={[0,3,3,0]}>
+                            <Recharts.LabelList dataKey={ano} position="right" style={{ fontSize:8, fill:"var(--gaq-text-3)" }} formatter={v => v > 0 ? v : ""} />
+                          </Recharts.Bar>
+                        ))}
+                      </Recharts.BarChart>
+                    </Recharts.ResponsiveContainer>
+                    <Pills items={topBuyers} totals={buyerTotalsAll} total={buyerTotal} labelFn={shortName} />
+                  </div>
+
+                  {/* ─ Card: Por Modalidade ─ */}
+                  <div className="gaq-card" style={{ padding:22, borderRadius:24 }}>
+                    <div style={{ fontWeight:700, fontSize:15, color:"var(--gaq-text)", marginBottom:2 }}>Distribuição por modalidade</div>
+                    <div style={{ fontSize:11, color:"var(--gaq-text-3)", marginBottom:10 }}>
+                      Volume de processos por modalidade e ano · <b style={{ color:"var(--gaq-text-2)" }}>{modTotal}</b> total
+                    </div>
+                    <YearLegend />
+                    <Recharts.ResponsiveContainer width="100%" height={mChartH}>
+                      <Recharts.BarChart layout="vertical" data={modData}
+                        margin={{ top:0, right:28, left:0, bottom:0 }}
+                        barCategoryGap="22%" barGap={2}>
+                        <Recharts.CartesianGrid strokeDasharray="3 3" stroke="var(--gaq-line)" horizontal={false} />
+                        <Recharts.XAxis type="number" fontSize={9} tick={{ fill:"var(--gaq-text-3)" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                        <Recharts.YAxis type="category" dataKey="name" width={YW_M} fontSize={10} tick={{ fill:"var(--gaq-text)", fontWeight:500 }} axisLine={false} tickLine={false} />
+                        <Recharts.Tooltip {...commonTooltip} />
+                        {displayAnos.map(ano => (
+                          <Recharts.Bar key={ano} dataKey={ano} fill={anoColor(ano)} barSize={BAR_H} radius={[0,3,3,0]}>
+                            <Recharts.LabelList dataKey={ano} position="right" style={{ fontSize:8, fill:"var(--gaq-text-3)" }} formatter={v => v > 0 ? v : ""} />
+                          </Recharts.Bar>
+                        ))}
+                      </Recharts.BarChart>
+                    </Recharts.ResponsiveContainer>
+                    <Pills items={topMods} totals={modTotalsAll} total={modTotal} />
+                  </div>
+
+                </div>
+              );
+            })()}
+
+            {/* ── Top 10 áreas: SD concluído sem RC ── */}
+            {(() => {
+              const semRC = fBase.filter(r => r.encSD && !r.aberturaRC && !r.isCanceled && !r.isFailed);
+              if (semRC.length === 0) return null;
+
+              const areaMap = {};
+              semRC.forEach(r => {
+                const area = (r["Área Requisitante"] || "N/I").trim();
+                if (!areaMap[area]) areaMap[area] = { total: 0, urgente: 0 };
+                areaMap[area].total++;
+                if ((r.diasDesdeEncSD || 0) > 7) areaMap[area].urgente++;
+              });
+
+              const chartData = Object.entries(areaMap)
+                .sort((a, b) => b[1].total - a[1].total)
+                .slice(0, 10)
+                .map(([area, v]) => ({
+                  name   : area.length > 30 ? area.slice(0, 29) + "…" : area,
+                  urgente: v.urgente,
+                  atencao: v.total - v.urgente,
+                  total  : v.total,
+                }));
+
+              const chartH = Math.max(180, chartData.length * 40 + 20);
+
+              return (
+                <div className="gaq-card" style={{ padding: 22, borderRadius: 24, marginBottom: 16 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14, flexWrap:"wrap", gap:8 }}>
+                    <div>
+                      <div style={{ fontWeight:700, fontSize:15, color:"var(--gaq-text)" }}>Top 10 áreas — SD encerrado sem RC aberta</div>
+                      <div style={{ fontSize:11, color:"var(--gaq-text-3)", marginTop:2 }}>
+                        Pré-compra encerrada pelo GAQ aguardando abertura da RC · <b style={{ color:"var(--gaq-text-2)" }}>{semRC.length}</b> processo{semRC.length !== 1 ? "s" : ""} no total
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", gap:12, alignItems:"center", flexWrap:"wrap" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:5, fontSize:10 }}>
+                        <div style={{ width:10, height:10, borderRadius:2, background:"#dc2626", flexShrink:0 }}/>
+                        <span style={{ color:"var(--gaq-text-3)" }}>Urgente (&gt;7 d.u. s/ RC)</span>
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", gap:5, fontSize:10 }}>
+                        <div style={{ width:10, height:10, borderRadius:2, background:"#f59e0b", flexShrink:0 }}/>
+                        <span style={{ color:"var(--gaq-text-3)" }}>Atenção (≤7 d.u.)</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Recharts.ResponsiveContainer width="100%" height={chartH}>
+                    <Recharts.BarChart layout="vertical" data={chartData}
+                      margin={{ top:0, right:36, left:0, bottom:0 }}
+                      barCategoryGap="28%" barGap={0}>
+                      <Recharts.CartesianGrid strokeDasharray="3 3" stroke="var(--gaq-line)" horizontal={false} />
+                      <Recharts.XAxis type="number" fontSize={9} tick={{ fill:"var(--gaq-text-3)" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <Recharts.YAxis type="category" dataKey="name" width={138} fontSize={10} tick={{ fill:"var(--gaq-text)", fontWeight:500 }} axisLine={false} tickLine={false} />
+                      <Recharts.Tooltip
+                        contentStyle={{ background:"var(--gaq-surface)", border:"1px solid var(--gaq-line)", borderRadius:8, fontSize:11, boxShadow:"0 4px 16px rgba(0,0,0,.08)" }}
+                        cursor={{ fill:"var(--gaq-bg-2)" }}
+                        formatter={(v, name) => [v, name === "urgente" ? "Urgente (>7 d.u. s/ RC)" : "Atenção (≤7 d.u. s/ RC)"]}
+                      />
+                      <Recharts.Bar dataKey="urgente" stackId="s" fill="#dc2626" barSize={22} radius={[0,0,0,0]} />
+                      <Recharts.Bar dataKey="atencao" stackId="s" fill="#f59e0b" barSize={22} radius={[0,3,3,0]}>
+                        <Recharts.LabelList
+                          content={({ x, y, width, height, value, index }) => {
+                            const total = chartData[index]?.total;
+                            if (!total) return null;
+                            return <text x={x + width + 6} y={y + height / 2 + 1} textAnchor="start" fontSize={11} fontWeight={700} fill="var(--gaq-text)">{total}</text>;
+                          }}
+                        />
+                      </Recharts.Bar>
+                    </Recharts.BarChart>
+                  </Recharts.ResponsiveContainer>
+                </div>
+              );
+            })()}
+
             {/* Insights Operacionais */}
             <div className="gaq-card" style={{ padding: 22, borderRadius: 24 }}>
               <div style={{ fontWeight: 700, fontSize: 15, color: "var(--gaq-text)", marginBottom: 2 }}>Insights operacionais</div>
@@ -7239,7 +7716,15 @@ GAQ — Gerência de Aquisições`;
         {aba === "processos" && <div>
           {renderBuscaPanel()}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-            <div style={{ fontWeight: 700, fontSize: 15, color: "var(--gaq-text)" }}>Todos os Processos ({fBase.length})</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "var(--gaq-text)" }}>
+                Todos os Processos ({allProcesses.length}{hideSDConcluido && fBase.length !== allProcesses.length ? ` de ${fBase.length}` : ""})
+              </div>
+              <button onClick={() => { setHideSDConcluido(v => !v); setPgAll(1); }}
+                style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 12px", borderRadius:20, cursor:"pointer", fontSize:11, fontWeight:600, border:`1.5px solid ${hideSDConcluido ? "#dc2626" : "var(--gaq-line)"}`, background: hideSDConcluido ? "#fee2e2" : "var(--gaq-bg-2)", color: hideSDConcluido ? "#dc2626" : "var(--gaq-text-3)", transition:"all .15s" }}>
+                {hideSDConcluido ? "✕ Ocultando SD Concluído" : "Ocultar SD Concluído"}
+              </button>
+            </div>
             <button className="gaq-btn" onClick={() => exportToExcel(fBase, "processos.xlsx")}>
               <Icon name="download" size={13}/> Exportar Excel
             </button>
@@ -7252,12 +7737,13 @@ GAQ — Gerência de Aquisições`;
                     { key: "ProcessKey", label: "Processo", w: 130 },
                     { key: "Objeto", label: "Objeto", w: 220 },
                     { key: "Modalidade", label: "Modalidade", w: 110 },
+                    { key: "_tags", label: "Tags", w: 100 },
                     { key: "status", label: "Status", w: 100 },
                     { key: "diasParado", label: "Último Movimento", w: 80 },
                     { key: "diasTotais", label: "Aging", w: 100 },
                     { key: "_score", label: "Score", w: 64 },
                   ].map(({ key, label, w }) => (
-                    <th key={key} onClick={() => key !== "_score" && toggleSort(key)}
+                    <th key={key} onClick={() => key !== "_score" && key !== "_tags" && toggleSort(key)}
                       style={{ padding: "10px 10px", textAlign: "left", cursor: key !== "_score" ? "pointer" : "default", color: "var(--gaq-text-3)", fontWeight: 600, fontSize: 10.5, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", minWidth: w, userSelect: "none" }}>
                       {label} {sortAll.col === key && (sortAll.dir === "desc" ? "▼" : "▲")}
                     </th>
@@ -7297,6 +7783,9 @@ GAQ — Gerência de Aquisições`;
                         </div>
                       </td>
                       <td style={{ padding: "12px 10px", fontSize: 12, color: "var(--gaq-text-2)" }}>{r.Modalidade || "—"}</td>
+                      <td style={{ padding: "8px 10px", maxWidth: 140 }}>
+                        {(() => { const tags = TagsManager.getForProcess(r.ProcessKey, r.TicketSD); return tags.length > 0 ? <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>{tags.slice(0,3).map(t => <TagBadge key={t} tag={t} small />)}{tags.length > 3 && <span style={{ fontSize:9, color:"var(--gaq-text-3)" }}>+{tags.length-3}</span>}</div> : <span style={{ fontSize:11, color:"var(--gaq-text-3)" }}>—</span>; })()}
+                      </td>
                       <td style={{ padding: "12px 10px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                           <span style={{ width: 7, height: 7, borderRadius: 999, background: stDot, flex: "none" }} />
@@ -7335,7 +7824,7 @@ GAQ — Gerência de Aquisições`;
                     </tr>
                   );
                 })}
-                {allPage.length === 0 && <tr><td colSpan={7} style={{ textAlign: "center", padding: 30, color: "var(--gaq-text-3)" }}>Nenhum processo encontrado.</td></tr>}
+                {allPage.length === 0 && <tr><td colSpan={8} style={{ textAlign: "center", padding: 30, color: "var(--gaq-text-3)" }}>Nenhum processo encontrado.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -9507,6 +9996,7 @@ GAQ — Gerência de Aquisições`;
       {selProc && <TimelineModal proc={selProc} onClose={() => setSelProc(null)} onOpenTags={onOpenTags} onUpdate={refreshTags} phaseIntervals={phaseIntervals} onToggleWatch={toggleWatch} watchVersion={watchVersion} hidePredictions={isDiretor} serviceDeskData={serviceDeskData} />}
       {tagModal && <TagModal proc={tagModal} onClose={() => setTagModal(null)} onUpdate={refreshTags} />}
       {pantanalSel && <PantanalModal proc={pantanalSel} onClose={() => setPantanalSel(null)} />}
+      {showEmailDiario && <EmailDiarioModal alertSDAberto={alertSDAberto} fBase={fBase} serviceDeskData={serviceDeskData} onClose={() => setShowEmailDiario(false)} />}
 
       {/* Floating controls for Presentation Mode */}
       {presMode && (
