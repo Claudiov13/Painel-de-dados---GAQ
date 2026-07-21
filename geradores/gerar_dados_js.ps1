@@ -50,10 +50,12 @@ foreach ($root in ($candidateRoots | Select-Object -Unique)) {
 
 if ($foundExcelPath) { $EXCEL_PATH = $foundExcelPath }
 
-# dados.js: mesma pasta deste script (pasta compartilhada "Sistema de compras")
+# dados.js: raiz do projeto (pasta acima de geradores/), onde o index.html le.
+# O log continua na pasta geradores/, junto do script.
 # Usa $PSScriptRoot para evitar problemas com acentos no caminho
-$OUTPUT_PATH = Join-Path $PSScriptRoot "dados.js"
-$LOG_PATH    = Join-Path $PSScriptRoot "gerar_dados_js.log"
+$PROJECT_ROOT = Split-Path -Parent $PSScriptRoot
+$OUTPUT_PATH  = Join-Path $PROJECT_ROOT "dados.js"
+$LOG_PATH     = Join-Path $PSScriptRoot "gerar_dados_js.log"
 
 # ── LOG ───────────────────────────────────────────────────────────────────────
 

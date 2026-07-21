@@ -11,13 +11,14 @@
   <!-- ══════════════════════════════════════════════════════════
        CDN DEPENDENCIES
        ══════════════════════════════════════════════════════════ -->
-  <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/papaparse/papaparse.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/react-is/umd/react-is.production.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/recharts/umd/Recharts.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.7/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-is@18.2.0/umd/react-is.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prop-types@15.8.1/prop-types.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.min.js"></script>
 
   <!-- ══════════════════════════════════════════════════════════
        AUTO-LOAD: dados.js, tags.js e chamados_servicedesk.js (funciona em file:// e SharePoint)
@@ -32,12 +33,19 @@
       document.write('<scr'+'ipt src="./dados.js?ts='+ts+'"><\/scr'+'ipt>');
       document.write('<scr'+'ipt src="./tags.js?ts='+ts+'"><\/scr'+'ipt>');
       document.write('<scr'+'ipt charset="UTF-8" src="./chamados_servicedesk.js?ts='+ts+'"><\/scr'+'ipt>');
+      document.write('<scr'+'ipt charset="UTF-8" src="./base_fracionamento.js?ts='+ts+'" onerror="console.info(\'base_fracionamento.js nao encontrado\')"><\/scr'+'ipt>');
     })();
   </script>
-  <script src="./auth.js"></script>
-  <script src="./config.js"></script>
-  <script src="./core.js"></script>
-  <script src="./reports.js"></script>
+  <!-- Scripts de código com o mesmo cache-bust dos dados: garante que após
+       atualizar auth/config/core/reports basta recarregar a página (sem Ctrl+F5) -->
+  <script>
+    (function(){
+      var ts = Date.now();
+      ["./auth.js","./config.js","./core.js","./reports.js"].forEach(function(src){
+        document.write('<scr'+'ipt src="'+src+'?ts='+ts+'"><\/scr'+'ipt>');
+      });
+    })();
+  </script>
   <script>window.IA_API_KEY = window.IA_API_KEY || "";</script>
   <script src="./apikey.js" onerror="console.info('apikey.js não encontrado — IA Insights ficará desabilitada')"></script>
   <script>
@@ -65,7 +73,7 @@ window.__reloadPainelScripts = function(){
       var m=[];
       if(!window.React)m.push("React");if(!window.ReactDOM)m.push("ReactDOM");
       if(!window.Babel)m.push("Babel");if(!window.XLSX)m.push("XLSX");
-      if(!window.Papa)m.push("PapaParse");if(!window.Recharts)m.push("Recharts");
+      if(!window.Papa)m.push("PapaParse");if(!window.PropTypes)m.push("PropTypes");if(!window.Recharts)m.push("Recharts");
       if(m.length){var e=document.getElementById("boot-status");if(e){e.style.display="block";e.textContent="Falha ao carregar: "+m.join(", ")+". Verifique bloqueio de rede/CDN.";}}
     })();
   </script>
@@ -346,8 +354,19 @@ const DrillDownPanel = ({
             <div style={{ fontWeight: 700, fontSize: 20, color: accent, letterSpacing: "-0.02em" }}>{drillDown.title}</div>
             <div className="gaq-meta" style={{ marginTop: 4 }}>{total.toLocaleString("pt-BR")} processo(s) no recorte</div>
           </div>
-          <div style={{ ...pillStyle(accent, `${accent}12`), fontSize: 12, fontWeight: 700 }}>
-            Lista detalhada com prazo de entrega e SLA
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ ...pillStyle(accent, `${accent}12`), fontSize: 12, fontWeight: 700 }}>
+              Lista detalhada com prazo de entrega e SLA
+            </div>
+            {total > 0 && <button className="gaq-btn" style={{ fontSize: 12 }}
+              onClick={() => {
+                const slug = (drillDown.title || "lista")
+                  .normalize("NFD").replace(new RegExp("[\\u0300-\\u036f]", "g"), "")
+                  .replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").toLowerCase();
+                exportToExcel(sortedData, `${slug || "lista"}.xlsx`);
+              }}>
+              <Icon name="download" size={13}/> Exportar Excel
+            </button>}
           </div>
         </div>
       </div>
@@ -424,7 +443,8 @@ const DrillDownPanel = ({
   );
 };
 
-const CopyChip = ({ label, value, color }) => {
+// solid: fundo na cor cheia (para uso em fundo claro, fora do header escuro)
+const CopyChip = ({ label, value, color, solid }) => {
   const [copied, setCopied] = React.useState(false);
   const doCopy = async (e) => {
     e.stopPropagation();
@@ -450,7 +470,7 @@ const CopyChip = ({ label, value, color }) => {
   };
   return (
     <button onClick={doCopy} title={`Copiar ${label}: ${value}`}
-      style={{ display: "inline-flex", alignItems: "center", gap: 4, background: copied ? "#27ae60" : "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 5, padding: "2px 8px", fontSize: 10, fontWeight: 700, color: "#fff", cursor: "pointer", transition: "background .2s" }}>
+      style={{ display: "inline-flex", alignItems: "center", gap: 4, background: copied ? "#27ae60" : (solid ? (color || "#1a5276") : "rgba(255,255,255,0.15)"), border: solid ? `1px solid ${color || "#1a5276"}` : "1px solid rgba(255,255,255,0.3)", borderRadius: 5, padding: "2px 8px", fontSize: 10, fontWeight: 700, color: "#fff", cursor: "pointer", transition: "background .2s" }}>
       <span style={{ fontSize: 9, opacity: .75, fontWeight: 400 }}>{label}:</span>
       <span>{value}</span>
       <span style={{ fontSize: 10 }}>{copied ? "✓" : "⎘"}</span>
@@ -500,61 +520,29 @@ const HistoricoModal = ({ proc, onClose }) => (
   </div>
 );
 
-/* ── FIX: TagModal com exclusão funcional ────────────────────── */
-const TagModal = ({ proc, onClose, onUpdate }) => {
-  const [tags, setTags] = useState(TagsManager.getForProcess(proc.ProcessKey, proc.TicketSD));
-  const [newTag, setNewTag] = useState("");
-  const allTags = TagsManager.getTagList();
-  const suggestions = allTags.filter(t => !tags.includes(t) && (!newTag || nrm(t).includes(nrm(newTag))));
-
-  const add = (tag) => {
-    const t = tag.trim(); if (!t || tags.includes(t)) return;
-    TagsManager.addTag(proc.ProcessKey, t, proc.TicketSD);
-    setTags(TagsManager.getForProcess(proc.ProcessKey, proc.TicketSD));
-    setNewTag("");
-    onUpdate();
-  };
-  const remove = (tag) => {
-    TagsManager.removeTag(proc.ProcessKey, tag, proc.TicketSD);
-    setTags(TagsManager.getForProcess(proc.ProcessKey, proc.TicketSD));
-    onUpdate();
-  };
+/* Tags são lidas do campo "PROJETO / EVENTO / AÇÃO" do JSON principal.
+   Edição manual foi desativada — o modal é apenas leitura. */
+const TagModal = ({ proc, onClose }) => {
+  const tags = TagsManager.getForProcess(proc.ProcessKey, proc.TicketSD);
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "#0009", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2100 }} onClick={onClose}>
       <div style={{ background: "var(--card)", borderRadius: 12, width: "min(480px,95vw)", maxHeight: "70vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px #0006" }} onClick={e => e.stopPropagation()}>
         <div style={{ padding: "14px 20px", background: "#34495e", color: "#fff", borderRadius: "12px 12px 0 0" }}>
-          <div style={{ fontWeight: 700, fontSize: 14 }}>Gerenciar Tags</div>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>Tag do processo</div>
           <div style={{ fontSize: 10, opacity: .7 }}>{proc.NumRC || "—"} · {(proc.Objeto || "").slice(0,60) || "—"}</div>
         </div>
         <div style={{ padding: "16px 20px", flex: 1, overflow: "auto" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginBottom: 6, textTransform: "uppercase" }}>Tags atuais</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginBottom: 6, textTransform: "uppercase" }}>Tag definida pelo dado</div>
           <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 14, minHeight: 28 }}>
-            {tags.length === 0 && <span style={{ color: "var(--text3)", fontSize: 12 }}>Nenhuma tag atribuída</span>}
-            {tags.map(t => <TagBadge key={t} tag={t} onRemove={() => remove(t)} />)}
+            {tags.length === 0
+              ? <span style={{ color: "var(--text3)", fontSize: 12 }}>Sem valor no campo "PROJETO / EVENTO / AÇÃO"</span>
+              : tags.map(t => <TagBadge key={t} tag={t} />)}
           </div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginBottom: 6, textTransform: "uppercase" }}>Adicionar tag</div>
-          <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-            <input value={newTag} onChange={e => setNewTag(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter" && newTag.trim()) add(newTag); }}
-              placeholder="Digite o nome da tag..."
-              style={{ flex: 1, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--input-bd)", fontSize: 12, background: "var(--input-bg)", color: "var(--text)" }} />
-            <button onClick={() => add(newTag)} disabled={!newTag.trim()}
-              style={{ padding: "7px 16px", borderRadius: 6, background: newTag.trim() ? "#2e86c1" : "#aaa", color: "#fff", border: "none", cursor: newTag.trim() ? "pointer" : "not-allowed", fontSize: 12, fontWeight: 700 }}>
-              + Adicionar
-            </button>
+          <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.5, background: "var(--card2)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 12px" }}>
+            A tag é derivada do campo <b>PROJETO / EVENTO / AÇÃO</b> do JSON principal.
+            Para alterá-la, edite o valor desse campo na base e recarregue os dados.
           </div>
-          {suggestions.length > 0 && <>
-            <div style={{ fontSize: 10, color: "var(--text3)", marginBottom: 4 }}>Tags existentes (clique para adicionar):</div>
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-              {suggestions.slice(0, 15).map(t => (
-                <span key={t} onClick={() => add(t)}
-                  style={{ cursor: "pointer", background: TagsManager.getTagColor(t) + "18", color: TagsManager.getTagColor(t), borderRadius: 12, padding: "2px 10px", fontSize: 11, fontWeight: 600, border: `1px solid ${TagsManager.getTagColor(t)}33` }}>
-                  + {t}
-                </span>
-              ))}
-            </div>
-          </>}
         </div>
         <div style={{ padding: "10px 20px", borderTop: "1px solid var(--border)", textAlign: "right" }}>
           <button onClick={onClose} style={{ padding: "7px 20px", borderRadius: 6, background: "var(--card2)", border: "1px solid var(--border)", color: "var(--text)", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Fechar</button>
@@ -760,6 +748,170 @@ const EmailDiarioModal = ({ alertSDAberto, fBase, serviceDeskData, onClose }) =>
             Copia o conteúdo HTML formatado para a área de transferência e abre o Outlook com o destinatário e assunto preenchidos. Cole (Ctrl+V) no corpo do e-mail.
           </div>
           <button onClick={onClose} style={{ background:"transparent", border:"1px solid var(--gaq-line)", borderRadius:8, padding:"9px 16px", cursor:"pointer", fontSize:11, color:"var(--gaq-text-3)" }}>Fechar</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Revisão pontual antes de gerar o PDF GAQ Sexta: permite ajustar Status,
+// Status Det. e incluir Observação por processo. As edições valem apenas para
+// o PDF gerado — nada é gravado na base/JSON.
+const GAQ_SEXTA_TD = { padding:"5px 8px", fontSize:11, borderBottom:"1px solid var(--gaq-line)", verticalAlign:"top", color:"var(--gaq-text)", lineHeight:1.35 };
+const GAQ_SEXTA_INPUT = { width:"100%", boxSizing:"border-box", fontSize:11, padding:"4px 6px", border:"1px solid var(--gaq-line)", borderRadius:6, background:"var(--gaq-bg-2)", color:"var(--gaq-text)" };
+const GAQ_SEXTA_EDIT_VAZIO = {};
+
+// Linha memoizada: só re-renderiza a linha que está sendo digitada,
+// mantendo o modal fluido mesmo com centenas de processos.
+const GaqSextaLinhaEditor = React.memo(({ r, idx, edit, removido, onEdit, onToggleRemove }) => {
+  const pk = r.ProcessKey;
+  const tag = (r["PROJETO / EVENTO / AÇÃO"] || "").toString().trim();
+  const corDu = r.diasTotais > 100 ? "#922b21" : r.diasTotais > 60 ? "#c0392b" : r.diasTotais > 30 ? "#e67e22" : "#27ae60";
+  const corPrev = r.diasParaEntrega == null ? "var(--gaq-text-3)" : r.diasParaEntrega < 0 ? "#c0392b" : r.diasParaEntrega <= 15 ? "#e67e22" : "#27ae60";
+  const valStatus    = edit.status    != null ? edit.status    : (r.status || "");
+  const valStatusDet = edit.statusDet != null ? edit.statusDet : (r.statusDet || "");
+  const valObs       = edit.obs       != null ? edit.obs       : "";
+  const editado = valStatus !== (r.status || "") || valStatusDet !== (r.statusDet || "") || valObs.trim() !== "";
+  return (
+    <tr style={{ background: removido ? "rgba(192,57,43,.07)" : editado ? "rgba(243,156,18,.10)" : "transparent", opacity: removido ? .5 : 1 }}>
+      <td style={{ ...GAQ_SEXTA_TD, whiteSpace:"nowrap" }}>
+        <button onClick={() => onToggleRemove(pk)} title={removido ? "Reincluir este processo no PDF" : "Excluir este processo do PDF (só desta exportação)"}
+          style={{ background: removido ? "#27ae6018" : "#c0392b12", color: removido ? "#27ae60" : "#c0392b", border:"1px solid " + (removido ? "#27ae6066" : "#c0392b44"), borderRadius:6, cursor:"pointer", fontSize:10, fontWeight:700, padding:"3px 8px", whiteSpace:"nowrap" }}>
+          {removido ? "↩ Reincluir" : "✖"}
+        </button>
+      </td>
+      <td style={{ ...GAQ_SEXTA_TD, color:"var(--gaq-text-3)", whiteSpace:"nowrap" }}>{idx}</td>
+      <td style={{ ...GAQ_SEXTA_TD, whiteSpace:"nowrap", textDecoration: removido ? "line-through" : "none" }}>
+        <div style={{ fontWeight:700 }}>{r.NumRC || "—"}</div>
+        <div style={{ fontSize:10, color:"var(--gaq-text-3)" }}>{r.TicketSD || "—"}</div>
+      </td>
+      <td style={{ ...GAQ_SEXTA_TD, maxWidth:130 }}>{tag ? <span style={{ fontSize:10, fontWeight:700, color:"#8e44ad", background:"#8e44ad15", borderRadius:4, padding:"1px 6px" }}>{tag}</span> : <span style={{ color:"var(--gaq-text-3)" }}>—</span>}</td>
+      <td style={{ ...GAQ_SEXTA_TD, maxWidth:300, textDecoration: removido ? "line-through" : "none" }}>{(r.Objeto || "—").slice(0, 120)}{(r.Objeto || "").length > 120 ? "…" : ""}</td>
+      <td style={{ ...GAQ_SEXTA_TD, whiteSpace:"nowrap", fontWeight:700, color:corPrev }}>{r.dataEntrega ? r.dataEntrega.toLocaleDateString("pt-BR") : "—"}</td>
+      <td style={{ ...GAQ_SEXTA_TD, whiteSpace:"nowrap", fontWeight:800, color:corDu }}>{r.diasTotais}</td>
+      <td style={{ ...GAQ_SEXTA_TD, minWidth:140 }}>
+        <input style={{ ...GAQ_SEXTA_INPUT, opacity: removido ? .5 : 1 }} value={valStatus} placeholder={r.status || "—"} disabled={removido}
+          onChange={e => onEdit(pk, "status", e.target.value)} />
+      </td>
+      <td style={{ ...GAQ_SEXTA_TD, minWidth:180 }}>
+        <input style={{ ...GAQ_SEXTA_INPUT, opacity: removido ? .5 : 1 }} value={valStatusDet} placeholder={r.statusDet || "—"} disabled={removido}
+          onChange={e => onEdit(pk, "statusDet", e.target.value)} />
+      </td>
+      <td style={{ ...GAQ_SEXTA_TD, minWidth:200 }}>
+        <input style={{ ...GAQ_SEXTA_INPUT, opacity: removido ? .5 : 1 }} value={valObs} placeholder="Observação pontual…" disabled={removido}
+          onChange={e => onEdit(pk, "obs", e.target.value)} />
+      </td>
+    </tr>
+  );
+});
+
+const GaqSextaEditorModal = ({ processos, area, meta, fBase, onClose }) => {
+  const [busca, setBusca] = React.useState("");
+  const [edits, setEdits] = React.useState({}); // ProcessKey -> {status?, statusDet?, obs?}
+  const [removidos, setRemovidos] = React.useState({}); // ProcessKey -> true (fora deste PDF)
+
+  const emA = React.useMemo(() =>
+    (processos || []).filter(r => r.emA).slice().sort((a, b) => b.diasTotais - a.diasTotais),
+  [processos]);
+
+  const onEdit = React.useCallback((pk, campo, valor) => {
+    setEdits(prev => ({ ...prev, [pk]: { ...(prev[pk] || {}), [campo]: valor } }));
+  }, []);
+  const onToggleRemove = React.useCallback(pk => {
+    setRemovidos(prev => { const n = { ...prev }; if (n[pk]) delete n[pk]; else n[pk] = true; return n; });
+  }, []);
+
+  const q = busca.trim().toLowerCase();
+  const visiveis = q
+    ? emA.filter(r => [r.NumRC, r.TicketSD, r.NumProcesso, r.Objeto, r["PROJETO / EVENTO / AÇÃO"], r.Comprador, r["Área Requisitante"], r.statusDet, r.status]
+        .map(v => (v || "").toString().toLowerCase()).join(" ").includes(q))
+    : emA;
+
+  // Overrides efetivos: só o que de fato difere do valor original da base
+  const buildOverrides = () => {
+    const overrides = {};
+    emA.forEach(r => {
+      const e = edits[r.ProcessKey];
+      if (!e) return;
+      const o = {};
+      if (e.status != null && e.status.trim() && e.status.trim() !== (r.status || "")) o.status = e.status.trim();
+      if (e.statusDet != null && e.statusDet.trim() && e.statusDet.trim() !== (r.statusDet || "")) o.statusDet = e.statusDet.trim();
+      if (e.obs != null && e.obs.trim()) o.obs = e.obs.trim();
+      if (Object.keys(o).length) overrides[r.ProcessKey] = o;
+    });
+    return overrides;
+  };
+  const editCount = Object.keys(buildOverrides()).length;
+  const removeCount = Object.keys(removidos).length;
+  // Trava de saída: qualquer digitação ou exclusão pendente exige confirmação
+  const temAlteracoes = Object.keys(edits).length > 0 || removeCount > 0;
+  const fechar = () => {
+    if (temAlteracoes && !window.confirm("Você tem edições/exclusões feitas para este PDF que ainda não foi gerado.\n\nSair e descartar tudo?")) return;
+    onClose();
+  };
+
+  const gerar = () => {
+    // Excluídos saem do PDF inteiro (lista, KPIs e tabelas) — só desta exportação
+    const procFiltrados = removeCount ? (processos || []).filter(r => !removidos[r.ProcessKey]) : processos;
+    const html = gerarRelatorioGAQSexta({ processos: procFiltrados, area, meta, fBase, overrides: buildOverrides() });
+    const win = window.open("", "_blank");
+    win.document.write(html);
+    win.document.close();
+    onClose();
+  };
+
+  const thStyle = { padding:"7px 9px", background:"#0f3d5e", color:"#fff", fontSize:10, fontWeight:700, textAlign:"left", borderRight:"1px solid #1a5276", whiteSpace:"nowrap", position:"sticky", top:0, zIndex:1 };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(15,23,42,.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2200, padding:16 }}>
+      <div style={{ background:"var(--gaq-surface)", borderRadius:14, width:"min(1420px,98vw)", maxHeight:"94vh", display:"flex", flexDirection:"column", boxShadow:"0 12px 48px rgba(0,0,0,.25)", border:"1px solid var(--gaq-line)" }} onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div style={{ padding:"16px 24px", background:"linear-gradient(135deg,#0f3d5e,#1a5276)", color:"#fff", borderRadius:"14px 14px 0 0", display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexShrink:0 }}>
+          <div>
+            <div style={{ fontSize:10, opacity:.72, textTransform:"uppercase", letterSpacing:".05em", marginBottom:4 }}>GAQ Sexta · Revisão antes do PDF</div>
+            <div style={{ fontSize:17, fontWeight:700, letterSpacing:"-.01em" }}>📋 {area} — {emA.length} processo(s) em andamento</div>
+            <div style={{ fontSize:11, opacity:.7, marginTop:4 }}>Ajuste Status / Status Det., inclua uma Observação ou exclua (✖) processos deste PDF. Vale só para esta exportação — a base não é alterada.</div>
+          </div>
+          <button onClick={fechar} style={{ background:"rgba(255,255,255,.12)", border:"1px solid rgba(255,255,255,.25)", color:"#fff", fontSize:18, cursor:"pointer", borderRadius:8, width:34, height:34, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, marginLeft:14 }}>×</button>
+        </div>
+
+        {/* Busca */}
+        <div style={{ padding:"12px 24px", borderBottom:"1px solid var(--gaq-line)", display:"flex", gap:10, alignItems:"center", flexShrink:0 }}>
+          <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="🔍 Buscar por RC, pré-compra, processo, TAG, objeto, comprador, área ou status…"
+            style={{ ...GAQ_SEXTA_INPUT, maxWidth:480, padding:"7px 10px", fontSize:12 }} />
+          <div style={{ fontSize:11, color:"var(--gaq-text-3)" }}>{visiveis.length} de {emA.length} exibidos · ordem do PDF (maior aging primeiro)</div>
+        </div>
+
+        {/* Lista */}
+        <div style={{ overflow:"auto", flex:1 }}>
+          <table style={{ width:"100%", borderCollapse:"collapse" }}>
+            <thead>
+              <tr>
+                {["PDF","#","RC / Pré-compra","TAG","Objeto","Prev. Entrega","d.u.","Status","Status Det.","Observação (só p/ este PDF)"].map(h => <th key={h} style={thStyle}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {visiveis.map((r, i) => (
+                <GaqSextaLinhaEditor key={(r.ProcessKey || "") + "_" + i} r={r} idx={emA.indexOf(r) + 1}
+                  edit={edits[r.ProcessKey] || GAQ_SEXTA_EDIT_VAZIO} removido={!!removidos[r.ProcessKey]}
+                  onEdit={onEdit} onToggleRemove={onToggleRemove} />
+              ))}
+            </tbody>
+          </table>
+          {visiveis.length === 0 && <div style={{ textAlign:"center", padding:40, color:"var(--gaq-text-3)", fontSize:12 }}>Nenhum processo encontrado para "{busca}".</div>}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding:"14px 24px", borderTop:"1px solid var(--gaq-line)", display:"flex", gap:10, alignItems:"center", flexShrink:0, background:"var(--gaq-bg-2)", borderRadius:"0 0 14px 14px" }}>
+          <button onClick={gerar}
+            style={{ background:"#0f3d5e", color:"#fff", border:"none", borderRadius:8, padding:"10px 20px", cursor:"pointer", fontSize:12, fontWeight:700, display:"flex", alignItems:"center", gap:7 }}>
+            📄 Gerar PDF{(editCount > 0 || removeCount > 0) ? ` (${[editCount > 0 ? `${editCount} editada${editCount > 1 ? "s" : ""}` : "", removeCount > 0 ? `${removeCount} excluída${removeCount > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ")})` : ""}
+          </button>
+          <div style={{ fontSize:10, color:"var(--gaq-text-3)", flex:1 }}>
+            Edições, observações e exclusões valem somente para o PDF gerado agora; a base permanece intacta. Para sair sem gerar, use Cancelar ou ✕ — será pedida confirmação se houver alterações.
+          </div>
+          <button onClick={fechar} style={{ background:"transparent", border:"1px solid var(--gaq-line)", borderRadius:8, padding:"9px 16px", cursor:"pointer", fontSize:11, color:"var(--gaq-text-3)" }}>Cancelar</button>
         </div>
       </div>
     </div>
@@ -1068,6 +1220,11 @@ function getServiceDeskAlertSummary(proc, serviceDeskData) {
   };
 }
 
+function isServiceDeskConcluido(proc) {
+  const statusProc = nrm(proc?.statusDet || proc?.status || "");
+  return statusProc.includes("service desk concluido");
+}
+
 function enrichWithSDHistory(proc, sdData) {
   if (!proc.TicketSD || !sdData) return proc;
   const record = getServiceDeskRecord(proc.TicketSD, sdData);
@@ -1130,6 +1287,22 @@ function enrichWithSDHistory(proc, sdData) {
   };
 }
 
+// Fonte única de "processo enriquecido": aplica as datas do log do SD e, em
+// seguida, a regra de status (statusEfetivoSD, core.js). Se o status do JSON é
+// "EM ANÁLISE SERVICE DESK" e há data de encerramento (do log ou do JSON), o
+// statusDet exibido vira "SERVICE DESK CONCLUÍDO". Qualquer outro status é
+// mantido. Usado em TODOS os lugares (busca, alertas, timeline, executivo) para
+// não haver duas versões do mesmo processo no portal.
+function enrichSD(proc, sdData) {
+  const enriched = enrichWithSDHistory(proc, sdData);
+  const novoStatus = statusEfetivoSD(enriched);
+  if (nrm(novoStatus).includes("service desk concluido") &&
+      nrm(enriched.statusDet || enriched.status || "") !== "service desk concluido") {
+    return { ...enriched, statusDet: novoStatus, _statusAjustadoLog: true };
+  }
+  return enriched;
+}
+
 function gerarScriptExtratorOTRS(ticketIds, modo) {
   const tplEl = document.getElementById(modo === "diurno" ? "otrs-tpl-diurno" : "otrs-tpl-rapido");
   if (!tplEl) return "/* template não encontrado */";
@@ -1137,9 +1310,10 @@ function gerarScriptExtratorOTRS(ticketIds, modo) {
   return tplEl.textContent.replace("{{LISTA_CHAMADOS}}", lista);
 }
 
-const ServiceDeskAlertStrip = ({ summary }) => {
+const ServiceDeskAlertStrip = ({ summary, showLastInteraction = true }) => {
   if (!summary) return null;
   const { comQuem, acao, estado, diasDesdeUltimaInteracao, ultimaInteracaoDate } = summary;
+  const hasLastInteraction = showLastInteraction && diasDesdeUltimaInteracao != null;
   const diasColor = diasDesdeUltimaInteracao == null ? "var(--gaq-text-3)"
     : diasDesdeUltimaInteracao > 10 ? "#dc2626"
     : diasDesdeUltimaInteracao > 5 ? "#c2410c"
@@ -1150,14 +1324,14 @@ const ServiceDeskAlertStrip = ({ summary }) => {
         <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--gaq-text-3)", marginBottom: 2 }}>Com quem está</div>
         <div style={{ fontSize: 12, fontWeight: 700, color: "var(--gaq-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{comQuem}</div>
       </div>
-      <div style={{ flex: "1 1 260px", minWidth: 200, padding: "7px 11px", borderRight: diasDesdeUltimaInteracao != null ? "1px solid var(--gaq-line)" : "none" }}>
+      <div style={{ flex: "1 1 260px", minWidth: 200, padding: "7px 11px", borderRight: hasLastInteraction ? "1px solid var(--gaq-line)" : "none" }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 2 }}>
           <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--gaq-text-3)" }}>Ação necessária</div>
           <span style={{ fontSize: 9, fontWeight: 600, color: "var(--gaq-text-3)", background: "var(--gaq-surface)", borderRadius: 999, padding: "1px 7px", border: "1px solid var(--gaq-line)", whiteSpace: "nowrap" }}>{estado}</span>
         </div>
         <div style={{ fontSize: 12, fontWeight: 600, color: "var(--gaq-text-2)", lineHeight: 1.35 }}>{acao}</div>
       </div>
-      {diasDesdeUltimaInteracao != null && (
+      {hasLastInteraction && (
         <div style={{ flex: "0 0 auto", padding: "7px 13px", minWidth: 110, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
           <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--gaq-text-3)", marginBottom: 2 }}>Últ. inter. SD</div>
           <div style={{ fontSize: 17, fontWeight: 800, color: diasColor, lineHeight: 1 }}>{diasDesdeUltimaInteracao}</div>
@@ -1226,13 +1400,16 @@ const ServiceDeskHistoryModal = ({ ticket, record, onClose }) => {
   );
 };
 
-const TimelineModal = ({ proc, onClose, onOpenTags, onUpdate, phaseIntervals, onToggleWatch, watchVersion, hidePredictions, serviceDeskData }) => {
+const TimelineModal = ({ proc: procRaw, onClose, onOpenTags, onUpdate, phaseIntervals, onToggleWatch, watchVersion, hidePredictions, serviceDeskData }) => {
   const [showHist, setShowHist] = useState(false);
   const [showServiceDeskHist, setShowServiceDeskHist] = useState(false);
   const [showPredictions, setShowPredictions] = useState(false);
   const [showObjeto, setShowObjeto] = useState(false);
   const [showCronMenu, setShowCronMenu] = useState(false);
   const [showResponsaveis, setShowResponsaveis] = useState(false);
+  // Enriquece sempre na abertura (datas do log + status efetivo), independente da
+  // lista que abriu o processo — evita duas versões do mesmo processo no portal.
+  const proc = React.useMemo(() => enrichSD(procRaw, serviceDeskData), [procRaw, serviceDeskData]);
   const tags = TagsManager.getForProcess(proc.ProcessKey, proc.TicketSD);
   const isWatched = WatchlistManager.isWatched(proc.ProcessKey);
   // Ordena fases: a Indicação Analista é volátil e fica em posição cronológica por proc.
@@ -1451,6 +1628,43 @@ const TimelineModal = ({ proc, onClose, onOpenTags, onUpdate, phaseIntervals, on
               </div>
             </div>
           )}
+
+          {/* Suite Sesc — colunas novas da planilha (lookup por chave normalizada
+              p/ tolerar variação de caixa/acentos no cabeçalho do Excel) */}
+          {(() => {
+            const findSuiteKey = (id) => Object.keys(proc).find(k => nrm(k).replace(/[\s_\-]/g, "") === id);
+            const kId = findSuiteKey("identificadorsuitesesc");
+            const kSt = findSuiteKey("statussuitesesc");
+            const kHab = findSuiteKey("habilitadaemsuitesesc");
+            const kResp = findSuiteKey("responsabilidadesuitesesc");
+            if (!kId && !kSt && !kHab && !kResp) return null; // colunas ainda não existem no dados.js
+            const txt = (v) => (v == null ? "" : v.toString().trim());
+            const vId = txt(kId && proc[kId]);
+            const vSt = txt(kSt && proc[kSt]);
+            const dHab = kHab ? pd(proc[kHab]) : null;
+            const vHab = dHab ? fmt(dHab) : txt(kHab && proc[kHab]);
+            const vResp = txt(kResp && proc[kResp]);
+            const Campo = ({ label, value }) => (
+              <div style={{ background: "var(--gaq-bg-2)", borderRadius: 8, padding: "6px 12px", minWidth: 0 }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: "var(--gaq-text-3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 2 }}>{label}</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--gaq-text)", wordBreak: "break-word" }}>{value || "—"}</div>
+              </div>
+            );
+            return (
+              <div className="gaq-card" style={{ padding: "14px 18px", marginBottom: 14, borderTop: "3px solid #16a085" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+                  <div className="gaq-eyebrow" style={{ color: "#16a085" }}>Suite Sesc</div>
+                  {vId ? <CopyChip label="Identificador" value={vId} color="#16a085" solid />
+                       : <span style={{ fontSize: 10, color: "var(--gaq-text-3)" }}>Identificador: —</span>}
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <Campo label="Status" value={vSt} />
+                  <Campo label="Habilitada em" value={vHab} />
+                  <Campo label="Responsabilidade" value={vResp} />
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Linha do tempo das fases */}
           <div className="gaq-card" style={{ padding: "16px 18px 8px" }}>
@@ -1680,29 +1894,83 @@ const PatternCard = ({ p, accent = "#e67e22" }) => (
   </div>
 );
 
-const RecCard = ({ r, i, pool }) => {
+const RecCard = ({ r, i, pool, dem, onTempAssign }) => {
   const poolColor = pool === "cpl" ? "#8e44ad" : "#1a5276";
   const accents = pool === "cpl" ? ["#8e44ad","#a569bd","#c39bd3"] : ["#1e8449","#2e86c1","#85c1e9"];
+  const areaLabel = dem && dem.area ? dem.area : "—";
+  // Justificativa textual: por que esta pessoa é uma boa pista
+  const motivos = [];
+  if (r.simArea >= 3) motivos.push(`${r.simArea} processos já tocados na mesma área`);
+  if (r.simObj >= 1) motivos.push(`${r.simObj} casos com objeto semelhante`);
+  if (!r.ignMod && r.simMod >= 3) motivos.push(`${r.simMod} processos na mesma modalidade`);
+  if (r.totSD >= 15) motivos.push(`alto volume de SDs absorvidos (${r.totSD})`);
+  if (r.throughput >= 70) motivos.push(`alta vazão de entregas (${r.throughput}% throughput)`);
+  if (r.cargaArea <= 2 && dem && dem.area) motivos.push(`baixa carga atual em "${areaLabel}" (${r.cargaArea})`);
+  if (r.cargaAnaliseSD <= 1) motivos.push(`pouco backlog em análise SD (${r.cargaAnaliseSD})`);
+  if (r.med != null && r.med <= 40) motivos.push(`lead médio rápido (${r.med} d.u.)`);
+  if (r.mediaTocadosPool > 0 && (r.tocadosAno || 0) < r.mediaTocadosPool * 0.9) motivos.push(`abaixo da média do pool no ano (${r.tocadosAno} vs ~${Math.round(r.mediaTocadosPool)})`);
+  if ((r.conclAno || r.concl2026 || 0) >= 5) motivos.push(`${r.conclAno || r.concl2026} concluído(s) no ano`);
+  if (pool !== "cpl" && (r.sdAtual || 0) <= 2) motivos.push(`baixo volume de SD aberto agora (${r.sdAtual || 0})`);
+  const subScores = [
+    ["Expertise", r.sA, 20, false],
+    ["Performance", r.sB, 8, false],
+    ["Carteira", r.sC, 24, false],
+    ["Complex.", r.sD, 4, r.ignMod],
+    ["Distrib. Justa", r.sE, 18, false],
+    ["Vol. SD", r.sF, 6, false],
+    ["Ano atual", r.sG, 14, false],
+  ];
   return (
     <div className="alert-card-modern" style={{ padding: 18, marginBottom: 10, borderLeft: `5px solid ${accents[i] || accents[0]}` }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        <span style={{ fontSize: 18 }}>{"🥇🥈🥉"[i]}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+        {i < 3
+          ? <span style={{ fontSize: 18 }}>{"🥇🥈🥉"[i]}</span>
+          : <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text3)", background: "var(--card2)", borderRadius: 6, padding: "2px 8px" }}>#{i + 1}</span>}
         <span style={{ fontWeight: 700, fontSize: 15, color: "var(--text)" }}>{r.comp}</span>
         <BadgeScore score={r.total} />
         <span style={{ background: poolColor + "22", color: poolColor, borderRadius: 6, padding: "1px 8px", fontSize: 10, fontWeight: 700 }}>{pool.toUpperCase()}</span>
-        {r.taxaCF > 25 && <span style={{ fontSize: 11, background: "#fef9e7", border: "1px solid #e67e22", color: "#d35400", borderRadius: 4, padding: "1px 7px" }}>⚠️ {r.taxaCF}% canc./frac.</span>}
+        {r.ignMod && <span style={{ fontSize: 10, background: "#ecf0f1", border: "1px solid #bdc3c7", color: "#7f8c8d", borderRadius: 4, padding: "1px 7px" }}>Modalidade ignorada</span>}
+        {!r.ignMod && r.taxaCF > 25 && <span style={{ fontSize: 11, background: "#fef9e7", border: "1px solid #e67e22", color: "#d35400", borderRadius: 4, padding: "1px 7px" }}>⚠️ {r.taxaCF}% canc./frac.</span>}
+        {onTempAssign && (
+          <button type="button" onClick={() => onTempAssign(r.comp, pool)}
+            style={{ marginLeft: "auto", background: poolColor, color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+            + temp.
+          </button>
+        )}
       </div>
-      <div className="grid-4" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6, marginBottom: 8 }}>
-        {[["Expertise",r.sA,35],["Performance",r.sB,30],["Carga",r.sC,25],["Complexidade",r.sD,15]].map(([l,v,mx]) => (
-          <div key={l} style={{ background: "var(--card2)", borderRadius: 5, padding: "7px 8px", textAlign: "center" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6, marginBottom: 8 }}>
+        {subScores.map(([l, v, mx, dimmed]) => (
+          <div key={l} style={{ background: "var(--card2)", borderRadius: 5, padding: "7px 6px", textAlign: "center", opacity: dimmed ? 0.4 : 1 }}>
             <div style={{ fontSize: 9, color: "var(--text3)" }}>{l} (/{mx})</div>
-            <div style={{ fontWeight: 700, color: poolColor, fontSize: 15 }}>{v}</div>
+            <div style={{ fontWeight: 700, color: !dimmed && v < 0 ? "#c0392b" : poolColor, fontSize: 15 }} title={v < 0 ? "Sobrecarga: carga atual acima do saudável" : undefined}>{dimmed ? "—" : v}</div>
           </div>
         ))}
       </div>
-      <div style={{ fontSize: 11, color: "var(--text2)" }}>
-        <div>• <b>Histórico:</b> {r.simArea} proc. mesma área · {r.simMod} mesma mod. · Lead médio: {r.med != null ? r.med + " d.u." : "sem dados"}</div>
-        <div>• <b>Carga atual:</b> {r.carga} em andamento · {r.crit} críticos</div>
+      <div style={{ fontSize: 11, color: "var(--text2)", display: "grid", gap: 4 }}>
+        <div>• <b>Histórico:</b> {r.simArea} na área · {r.ignMod ? "modalidade ignorada" : `${r.simMod} na modalidade`} · {r.simObj} objeto similar · lead {r.med != null ? r.med + " d.u." : "—"}</div>
+        <div>• <b>Ano atual:</b> {r.totSD} SD(s) no histórico · {r.tocadosAno ?? r.receb2026 ?? 0} processo(s) tocado(s){r.mediaTocadosPool > 0 && <span style={{ color: "var(--text3)" }}> (média do pool ~{Math.round(r.mediaTocadosPool)})</span>} · {r.conclAno ?? r.concl2026 ?? 0} concluído(s) · <b style={{ color: r.throughput >= 70 ? "#1e8449" : r.throughput >= 40 ? "#f39c12" : "#c0392b" }}>throughput {r.throughput || 0}%</b></div>
+        <div>• <b>Carga {pool.toUpperCase()} atual:</b> {r.carga} distribuída(s){r.tempAtual > 0 && <> · <b style={{ color: "#d35400" }}>{r.tempAtual} temp.</b></>} · {r.cargaPond ?? r.carga} ponderado{pool !== "cpl" && <> · {r.sdAtual ?? 0} SD(s) aberto(s)</>} · {r.crit} críticos</div>
+        <div style={{ background: "var(--card2)", borderRadius: 6, padding: "6px 10px", marginTop: 2, borderLeft: `3px solid ${poolColor}` }}>
+          <div style={{ fontSize: 10, color: "var(--text3)", textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, marginBottom: 3 }}>Distribuição ponderada (Comprador 1.0 · Avaliador 0.5)</div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 11 }}>
+            <span><b style={{ color: poolColor }}>{r.cargaArea}</b> em "{areaLabel}"</span>
+            <span>·</span>
+            <span><b style={{ color: r.cargaAnaliseSD > 3 ? "#c0392b" : poolColor }}>{r.cargaAnaliseSD}</b> em análise pré-compra</span>
+            <span>·</span>
+            <span><b style={{ color: poolColor }}>{r.cargaTotalSub}</b> total {pool.toUpperCase()}</span>
+            {r.cargaTotalSubPond != null && r.cargaTotalSubPond !== r.cargaTotalSub && (
+              <>
+                <span>·</span>
+                <span><b style={{ color: poolColor }}>{r.cargaTotalSubPond}</b> ponderado</span>
+              </>
+            )}
+          </div>
+        </div>
+        {motivos.length > 0 && (
+          <div style={{ fontSize: 10, color: "var(--text3)", fontStyle: "italic", marginTop: 2 }}>
+            ↳ {motivos.slice(0, 3).join(" · ")}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1891,13 +2159,11 @@ const loadFromGlobals = useCallback(() => {
     const parsed = parseBase(window.__PAINEL_DADOS__);
     setRawRows(window.__PAINEL_DADOS__);
     setBase(parsed);
+    TagsManager.loadFromBase(parsed);
+    refreshTags();
     setMeta({ nomeArq: "dados.js (sync)", atualizadoEm: new Date().toLocaleString("pt-BR"), total: parsed.length });
     setSenhaOk(true);
     ok = true;
-  }
-  if (window.__PAINEL_TAGS__) {
-    TagsManager.importTags(window.__PAINEL_TAGS__);
-    refreshTags();
   }
   return ok;
 }, [refreshTags]);
@@ -1936,9 +2202,18 @@ useEffect(() => {
   const refreshTags = useCallback(() => setTagVersion(v => v + 1), []);
 
   // FIX: Nova demanda — estados separados para NCL e CPL
-  const [dem, setDem] = useState({ area: "", modalidade: "", objeto: "" });
+  const [dem, setDem] = useState({ area: "", modalidade: "", objeto: "", ignorarMod: false });
   const [recsNCL, setRecsNCL] = useState([]);
   const [recsCPL, setRecsCPL] = useState([]);
+  const [tempDemandas, setTempDemandas] = useState([]);
+  // Distribuição rápida temporária: só a pessoa é obrigatória, o resto é opcional
+  const [quickTemp, setQuickTemp] = useState({ responsavel: "", pool: "", area: "", modalidade: "", objeto: "", quantidade: 1 });
+  // Redistribuição de carteira de quem está de férias/indisponível: origem|pool -> { receiver, qty }
+  const [redistForm, setRedistForm] = useState({});
+  // Compradores/Avaliadores marcados como indisponíveis (férias, atestado etc.)
+  const [comprIgnorados, setComprIgnorados] = useState(() => new Set());
+  // Mostrar ranking completo (todos os candidatos) ou só top 3
+  const [verRankingCompleto, setVerRankingCompleto] = useState(false);
 
   const [fAnoSD, setFAnoSD] = useState(""); const [fAnoRC, setFAnoRC] = useState("");
   const [fMod, setFMod] = useState(""); const [fArea, setFArea] = useState("");
@@ -1957,6 +2232,13 @@ useEffect(() => {
   const [genIsAdmin, setGenIsAdmin] = useState(false);
   const [genResultado, setGenResultado] = useState(null); // { linha, varName, tipo }
   const [genCopiado, setGenCopiado] = useState(false);
+  // ── Relatório Customizado (aba admin) ──
+  const [rcuAreas, setRcuAreas] = useState([]);           // áreas selecionadas (vazio = todas)
+  const [rcuDias, setRcuDias] = useState("");             // nº de d.u. a contar da RC ("" = sem filtro)
+  const [rcuDiasModo, setRcuDiasModo] = useState("ate");  // "ate" = RC nos últimos N d.u. | "acima" = RC há mais de N d.u.
+  const [rcuStatus, setRcuStatus] = useState(["andamento"]); // andamento|concluidos|cancelfrac|suspensos
+  const [rcuInds, setRcuInds] = useState(["total","andamento","concluidos","slaok","criticos","lead","aging","parados"]);
+  const [rcuExcl, setRcuExcl] = useState([]);             // processos excluídos manualmente do relatório (ids)
   const [metroComp, setMetroComp] = useState("");
   const [metroBusca, setMetroBusca] = useState("");
   const [metroAgrupado, setMetroAgrupado] = useState(false);
@@ -1966,12 +2248,14 @@ useEffect(() => {
   const [pgPantanalSz, setPgPantanalSz] = useState(50);
   const [pantanalSel, setPantanalSel] = useState(null);
   const [showEmailDiario, setShowEmailDiario] = useState(false);
+  const [showGaqSextaEditor, setShowGaqSextaEditor] = useState(false);
   const [pantanalBusca, setPantanalBusca] = useState("");
   const [topMenuOpen, setTopMenuOpen] = useState(false);
   const [busca, setBusca] = useState("");
 
   const [selComp, setSelComp] = useState(null);
   const [selProc, setSelProc] = useState(null);
+  const [projetoTag, setProjetoTag] = useState("");
   const [drillDown, setDrillDown] = useState(null);
   const [pgDrillDown, setPgDrillDown] = useState(1);
   const [pgDrillDownSz, setPgDrillDownSz] = useState(PAGE_SIZES[0] || 20);
@@ -1991,6 +2275,8 @@ useEffect(() => {
   // ── Cronograma de entregas ─────────────────────────────────────────
   const [calMes, setCalMes] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
   const [calDiaSel, setCalDiaSel] = useState(null);
+  // ── Planejamento: mês expandido no cronograma anual de recorrência ────────
+  const [recMesAberto, setRecMesAberto] = useState(null);
   const [pgHS, setPgHS] = useState(1); const [pgHSSz, setPgHSSz] = useState(20);
   const [pgStag, setPgStag] = useState(1); const [pgStagSz, setPgStagSz] = useState(20);
   const toggleWatch = useCallback((proc) => {
@@ -2308,6 +2594,8 @@ useEffect(() => {
       const parsed = parseBase(window.__PAINEL_DADOS__);
       setRawRows(window.__PAINEL_DADOS__);
       setBase(parsed);
+      TagsManager.loadFromBase(parsed);
+      refreshTags();
       setMeta({ nomeArq: "dados.js (auto)", atualizadoEm: new Date().toLocaleString("pt-BR"), total: parsed.length });
       setSenhaOk(true);
       // Só navega para overview/dirHome se já tiver sessão de login ativa
@@ -2315,36 +2603,29 @@ useEffect(() => {
       loaded = true;
       setAutoSync(true);
     }
-    // Tenta tags
-    if (window.__PAINEL_TAGS__) {
-      TagsManager.importTags(window.__PAINEL_TAGS__);
-      refreshTags();
-    }
+    const isFileMode = window.location.protocol === "file:";
     if (window.__SERVICE_DESK__ && typeof window.__SERVICE_DESK__ === "object") {
       setServiceDeskData(window.__SERVICE_DESK__);
-    } else {
+    } else if (!isFileMode) {
       fetch("./chamados_servicedesk.json?ts=" + Date.now(), { cache: "no-store" })
         .then(r => { if (!r.ok) throw new Error("x"); return r.json(); })
         .then(data => { if (data && typeof data === "object") setServiceDeskData(data); })
         .catch(() => {});
     }
     // Fallback: tenta fetch (funciona se servido por HTTP)
-    if (!loaded) {
+    if (!loaded && !isFileMode) {
       fetch("./dados.json")
         .then(r => { if (!r.ok) throw new Error("x"); return r.json(); })
         .then(data => {
           if (Array.isArray(data) && data.length > 0) {
             const parsed = parseBase(data);
             setRawRows(data); setBase(parsed);
+            TagsManager.loadFromBase(parsed); refreshTags();
             setMeta({ nomeArq: "dados.json (auto)", atualizadoEm: new Date().toLocaleString("pt-BR"), total: parsed.length });
             setSenhaOk(true);
             try { if (sessionStorage.getItem("painel_login_ok")) setAba("overview"); } catch {}
           }
         })
-        .catch(() => {});
-      fetch("./tags.json")
-        .then(r => { if (!r.ok) throw new Error("x"); return r.json(); })
-        .then(data => { TagsManager.importTags(data); refreshTags(); })
         .catch(() => {});
     }
   }, []);
@@ -2366,6 +2647,7 @@ useEffect(() => {
         }
         const parsed = parseBase(rows);
         setRawRows(rows); setBase(parsed);
+        TagsManager.loadFromBase(parsed); refreshTags();
         setMeta({ nomeArq: f.name, atualizadoEm: new Date().toLocaleString("pt-BR"), total: parsed.length });
         setAba("overview");
       } catch (err) { setErro("Erro ao processar: " + err.message); }
@@ -2397,6 +2679,14 @@ useEffect(() => {
     return arr;
   }, [base, loginUser, loginArea, isDiretor, dirAreaSel]);
 
+  // Base enriquecida com o log do SD + status efetivo (statusEfetivoSD). É a
+  // fonte canônica do detalhe do processo — definida cedo para que a busca e
+  // todos os painéis enxerguem exatamente os mesmos dados (datas e status).
+  const baseEnriched = useMemo(() => {
+    const sd = (serviceDeskData && Object.keys(serviceDeskData).length) ? serviceDeskData : null;
+    return baseVis.map(proc => enrichSD(proc, sd));
+  }, [baseVis, serviceDeskData]);
+
   // ── Busca (debounced) ──────────────────────────────────────────────
   const [buscaDefer, setBuscaDefer] = useState("");
   const buscaTimerRef = useRef(null);
@@ -2408,8 +2698,8 @@ useEffect(() => {
   const buscaResults = useMemo(() => {
     if (!buscaDefer.trim() || buscaDefer.length < 3) return [];
     const q = nrm(buscaDefer.trim());
-    return baseVis.filter(r => nrm(r.NumRC).includes(q) || nrm(r.TicketSD).includes(q) || nrm(r.ProcessKey || "").includes(q) || nrm(r.Objeto || "").includes(q) || nrm(r.NumPedidoSuite || "").includes(q) || nrm(r.NumProcesso || "").includes(q)).slice(0, 30);
-  }, [buscaDefer, baseVis]);
+    return baseEnriched.filter(r => nrm(r.NumRC).includes(q) || nrm(r.TicketSD).includes(q) || nrm(r.ProcessKey || "").includes(q) || nrm(r.Objeto || "").includes(q) || nrm(r.NumPedidoSuite || "").includes(q) || nrm(r.NumProcesso || "").includes(q)).slice(0, 30);
+  }, [buscaDefer, baseEnriched]);
 
   const anosSD = useMemo(() => [...new Set(baseVis.map(r => r.anoSD).filter(Boolean))].sort((a,b) => b-a).map(String), [baseVis]);
   const anosRC = useMemo(() => [...new Set(baseVis.map(r => r.anoRC).filter(Boolean))].sort((a,b) => b-a).map(String), [baseVis]);
@@ -2436,18 +2726,23 @@ useEffect(() => {
   const allTagsList = useMemo(() => { tagVersion; return TagsManager.getTagList(); }, [tagVersion]);
 
   // Pools separados NCL vs CPL
-  // NCL: usa respNCL (Comprador || Avaliador) como identificador do responsável
-  const compsNCLPool = useMemo(() => [...new Set(baseVis.filter(r => !r.ehCPL).map(r => r.respNCL).filter(c => c && !IGNORAR.includes(nrm(c))))].sort(), [baseVis]);
+  // NCL: somente compradores com processo em andamento HOJE na fase NCL
+  //      (mesmo critério do "Ranking de compradores" do painel executivo).
+  //      Descarta históricos inativos (ex.: Marcus, Ana Carolina) e placeholders ("N/I", "N/A").
+  const NOME_INVALIDO = ["", "n/i", "n/a", "nao informado", "nao informada", "sem comprador", "sem responsavel"];
+  const compsNCLPool = useMemo(() => {
+    const ativos = new Set();
+    base.filter(r => r.emA && r.faseSubarea === "NCL" && (r.Comprador || r.Avaliador))
+      .forEach(r => ativos.add(r.Comprador || r.Avaliador));
+    return [...ativos]
+      .filter(c => c && !IGNORAR.includes(nrm(c)) && !NOME_INVALIDO.includes(nrm(c)))
+      .sort();
+  }, [base]);
   const compsCPLPool = useMemo(() => {
     const s = new Set();
-    baseVis.filter(r => r.ehCPL).forEach(r => { if (r.Pregoeiro) s.add(r.Pregoeiro); if (r.cplResp) s.add(r.cplResp); });
-    return [...s].filter(c => !IGNORAR.includes(nrm(c))).sort();
-  }, [baseVis]);
-
-  const baseEnriched = useMemo(() => {
-    if (!serviceDeskData || !Object.keys(serviceDeskData).length) return baseVis;
-    return baseVis.map(proc => enrichWithSDHistory(proc, serviceDeskData));
-  }, [baseVis, serviceDeskData]);
+    base.filter(r => r.ehCPL && r.emA).forEach(r => { if (r.Pregoeiro) s.add(r.Pregoeiro); if (r.cplResp) s.add(r.cplResp); });
+    return [...s].filter(c => c && !IGNORAR.includes(nrm(c)) && !NOME_INVALIDO.includes(nrm(c))).sort();
+  }, [base]);
 
   const fBase = useMemo(() => baseEnriched.filter(r => {
     if (fAnoSD && String(r.anoSD) !== fAnoSD) return false;
@@ -3439,18 +3734,55 @@ const topModLentas = (() => {
       .map(m => ({ ...m, sobPressao: problematicosRows.filter(r => nrm(r.Modalidade) === nrm(m.label)).length }))
       .sort((a, b) => b.sobPressao - a.sobPressao || b.count - a.count);
 
-    // Ranking de compradores por volume de demandas + média d.u. NCL
+    // Ranking de compradores por volume de demandas + média d.u. NCL.
+    // Exclui pré-compra com SD concluído e ainda sem RC: não há esforço do
+    // comprador enquanto a RC não é aberta, então não conta na carteira dele.
     const buyerMap = {};
-    fBack.filter(r => r.faseSubarea === "NCL" && (r.Comprador || r.Avaliador)).forEach(r => {
+    fBack.filter(r => r.faseSubarea === "NCL" && (r.Comprador || r.Avaliador) && !isSDConcluidoSemRC(r)).forEach(r => {
       const nome = r.Comprador || r.Avaliador;
-      if (!buyerMap[nome]) buyerMap[nome] = { nome, demandas: 0, totalDias: 0, count: 0 };
+      if (!buyerMap[nome]) buyerMap[nome] = { nome, demandas: 0, totalDias: 0, count: 0, rows: [] };
       buyerMap[nome].demandas++;
+      buyerMap[nome].rows.push(r);
       if (r.diasTotais > 0) { buyerMap[nome].totalDias += r.diasTotais; buyerMap[nome].count++; }
     });
     const buyerRanking = Object.values(buyerMap)
       .map(b => ({ ...b, mediaDU: b.count > 0 ? Math.round(b.totalDias / b.count) : 0 }))
       .sort((a, b) => b.demandas - a.demandas)
       .slice(0, 10);
+
+    // Pré-compra (Service Desk com número de SD mas SEM RC vinculada) por Status.
+    // Usa statusEfetivoSD (core.js): aproveita o log do ticket — "EM ANÁLISE
+    // SERVICE DESK" com data de encerramento (encSD) vira "SERVICE DESK
+    // CONCLUÍDO"; demais status do JSON são mantidos. Este gráfico MOSTRA inclusive
+    // os concluídos (é o panorama da pré-compra), mas eles não entram na carga do
+    // comprador no ranking acima nem no balanceamento de nova demanda.
+    const preCompraRows = fBack.filter(r => r.somenteSD && (r.Comprador || r.Avaliador));
+    const preCompraStatusMap = {};
+    preCompraRows.forEach(r => {
+      const st = statusEfetivoSD(r);
+      if (!preCompraStatusMap[st]) preCompraStatusMap[st] = { status: st, count: 0, rows: [] };
+      preCompraStatusMap[st].count++;
+      preCompraStatusMap[st].rows.push(r);
+    });
+    const preCompraStatus = Object.values(preCompraStatusMap).sort((a, b) => b.count - a.count);
+    const preCompraTotal = preCompraRows.length;
+
+    // Mesma carteira (SD sem RC) quebrada por responsável NCL (respNCL = Comprador
+    // || Avaliador). Por pessoa: quantos "em análise" e quantos "concluído sem RC".
+    // A soma de todos continua = preCompraTotal (157).
+    const preCompraByRespMap = {};
+    preCompraRows.forEach(r => {
+      const nome = r.respNCL || r.Comprador || r.Avaliador || "—";
+      const n = nrm(statusEfetivoSD(r));
+      if (!preCompraByRespMap[nome]) preCompraByRespMap[nome] = { nome, emAnalise: 0, concluido: 0, outros: 0, total: 0, emAnaliseRows: [], concluidoRows: [], outrosRows: [], rows: [] };
+      const g = preCompraByRespMap[nome];
+      g.total++; g.rows.push(r);
+      if (n.includes("concluido")) { g.concluido++; g.concluidoRows.push(r); }
+      else if (n.includes("em analise service desk")) { g.emAnalise++; g.emAnaliseRows.push(r); }
+      else { g.outros++; g.outrosRows.push(r); }
+    });
+    const preCompraByResp = Object.values(preCompraByRespMap)
+      .sort((a, b) => b.total - a.total || b.emAnalise - a.emAnalise || a.nome.localeCompare(b.nome));
 
     const buyerHistoryMap = {};
     const concludedModTotals = {};
@@ -3542,6 +3874,9 @@ const topModLentas = (() => {
       insights,
       buyerRanking,
       buyerRankingConcluded,
+      preCompraStatus,
+      preCompraTotal,
+      preCompraByResp,
       atrasadosSla: slaVencidoRows,
     };
   }, [base, fBase, fBack, phaseIntervals]);
@@ -3746,18 +4081,168 @@ const topModLentas = (() => {
   const onClickProc = (r) => setSelProc(r);
   const onOpenTags = (r) => setTagModal(r);
 
+  function buildTempBacklogRows(tempList) {
+    const hoje = new Date();
+    return (tempList || []).map((t, idx) => {
+      const isCpl = t.pool === "cpl";
+      const responsavel = t.responsavel || "";
+      return {
+        _tempDemand: true,
+        ProcessKey: t.id || `TEMP_${idx}`,
+        NumRC: "",
+        TicketSD: t.ticket || "",
+        Objeto: t.objeto || "",
+        "Área Requisitante": t.area || "",
+        Modalidade: t.modalidade || "",
+        emA: true,
+        isCanceled: false,
+        isFailed: false,
+        isConcluded: false,
+        faseSubarea: isCpl ? "CPL" : "NCL",
+        Comprador: isCpl ? "" : responsavel,
+        Avaliador: "",
+        respNCL: isCpl ? "" : responsavel,
+        Pregoeiro: isCpl ? responsavel : "",
+        cplResp: isCpl ? responsavel : "",
+        aberturaSD: isCpl ? null : hoje,
+        encSD: null,
+        aberturaRC: hoje,
+        statusDet: isCpl ? "DEMANDA TEMPORARIA CPL" : "EM ANALISE SERVICE DESK - TEMPORARIA",
+        criticoNcl: false,
+        criticoNclGestao: false,
+        criticoCpl: false,
+        LeadTime: 0,
+      };
+    });
+  }
+
   // FIX: gerarRecs com pools separados + limpar
-  function gerarRecs() {
-    const allBack = base.filter(r => r.emA); // backlog global sem filtros de UI
-    const scNCL = compsNCLPool.map(c => ({ comp: c, ...calcularScore(c, base, allBack, dem, "ncl") })).sort((a,b) => b.total - a.total).slice(0, 3);
-    const scCPL = compsCPLPool.map(c => ({ comp: c, ...calcularScore(c, base, allBack, dem, "cpl") })).sort((a,b) => b.total - a.total).slice(0, 3);
+  function gerarRecs(tempList = tempDemandas) {
+    const histBase = base;
+    // Backlog a partir da base canônica enriquecida (datas do log + status
+    // efetivo), para que a regra de "SD concluído sem RC" — que tira o processo
+    // da carga do comprador — valha igual no balanceamento e no painel executivo.
+    const allBack = [
+      ...baseEnriched.filter(r => r.emA && !r.isCanceled && !r.isFailed),
+      ...buildTempBacklogRows(tempList),
+    ]; // backlog global sem filtros de UI + temporarias da sessao
+    const opts = { ignorarModalidade: !!dem.ignorarMod || !dem.modalidade, anoAtual: new Date().getFullYear() };
+    // Filtra do pool quem foi marcado como indisponível
+    const ignSet = comprIgnorados;
+    const poolNCL = compsNCLPool.filter(c => !ignSet.has(c));
+    const poolCPL = compsCPLPool.filter(c => !ignSet.has(c));
+    // Mantém TODOS os candidatos rankeados; UI decide se mostra top 3 ou tudo
+    // Ordena por rankScore (total bruto, pode ser negativo p/ sobrecarregados)
+    const ordenarRank = (a, b) => (b.rankScore ?? b.total) - (a.rankScore ?? a.total);
+    // Duas passadas: a 1ª só extrai tocadosAno de cada candidato para obter a
+    // média do pool; a 2ª pontua de verdade com essa média (componente de
+    // equilíbrio anual do sG — quem já tocou mais que a média do time perde).
+    const mediaTocados = (pool, tipo) => {
+      const vals = pool.map(c => calcularScore(c, histBase, allBack, dem, tipo, opts).tocadosAno || 0);
+      return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+    };
+    const optsNCL = { ...opts, mediaTocadosPool: mediaTocados(poolNCL, "ncl") };
+    const optsCPL = { ...opts, mediaTocadosPool: mediaTocados(poolCPL, "cpl") };
+    const scNCL = poolNCL.map(c => ({ comp: c, ...calcularScore(c, histBase, allBack, dem, "ncl", optsNCL) })).sort(ordenarRank);
+    const scCPL = poolCPL.map(c => ({ comp: c, ...calcularScore(c, histBase, allBack, dem, "cpl", optsCPL) })).sort(ordenarRank);
     setRecsNCL(scNCL);
     setRecsCPL(scCPL);
   }
+  // Núcleo: adiciona N demandas temporárias para uma pessoa. Só responsavel+pool
+  // são obrigatórios; área/modalidade/objeto são opcionais. origem registra de
+  // quem a carteira foi redistribuída (férias), apenas para rótulo — não muda o JSON.
+  function addTempDemandas(payload) {
+    const responsavel = (payload.responsavel || "").trim();
+    const pool = payload.pool || "ncl";
+    if (!responsavel) return false;
+    const qty = Math.max(1, Math.min(99, parseInt(payload.quantidade, 10) || 1));
+    const novas = [];
+    for (let k = 0; k < qty; k++) {
+      novas.push({
+        id: `TEMP_${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${k}`,
+        pool,
+        responsavel,
+        area: payload.area || "",
+        modalidade: payload.modalidade || "",
+        objeto: payload.objeto || (payload.origem ? `Redistribuição da carteira de ${payload.origem}` : "Demanda temporária"),
+        origem: payload.origem || "",
+        criadaEm: new Date().toISOString(),
+      });
+    }
+    const next = [...tempDemandas, ...novas];
+    setTempDemandas(next);
+    gerarRecs(next);
+    return true;
+  }
+  // Usada pelos cards de recomendação: herda os campos da demanda em edição.
+  function registrarTempDemanda(responsavel, pool) {
+    addTempDemandas({
+      responsavel, pool,
+      area: dem.area || "",
+      modalidade: dem.ignorarMod ? "" : (dem.modalidade || ""),
+      objeto: dem.objeto || "Demanda temporária",
+    });
+  }
+  // Distribuição rápida (painel próprio): só a pessoa é obrigatória.
+  function adicionarQuickTemp() {
+    if (!quickTemp.responsavel) return;
+    const ok = addTempDemandas({
+      responsavel: quickTemp.responsavel,
+      pool: quickTemp.pool || (compsCPLPool.includes(quickTemp.responsavel) && !compsNCLPool.includes(quickTemp.responsavel) ? "cpl" : "ncl"),
+      area: quickTemp.area || "",
+      modalidade: quickTemp.modalidade || "",
+      objeto: quickTemp.objeto || "",
+      quantidade: quickTemp.quantidade,
+    });
+    if (ok) setQuickTemp({ responsavel: "", pool: "", area: "", modalidade: "", objeto: "", quantidade: 1 });
+  }
+  // Conta a carteira ATIVA real de uma pessoa (base global, sem filtros de UI),
+  // separada por pool — base para a redistribuição de férias.
+  function contarCarteira(nome) {
+    if (!nome) return { ncl: 0, cpl: 0 };
+    const ativos = base.filter(r => r.emA && !r.isCanceled && !r.isFailed);
+    const ncl = ativos.filter(r => r.respNCL === nome || r.Comprador === nome || r.Avaliador === nome).length;
+    const cpl = ativos.filter(r => r.cplResp === nome || r.Pregoeiro === nome).length;
+    return { ncl, cpl };
+  }
+  // Redistribui a carteira de quem está indisponível (férias) para outra pessoa.
+  function redistribuirCarteira(origem, pool) {
+    const key = `${origem}|${pool}`;
+    const f = redistForm[key] || {};
+    if (!f.receiver) return;
+    // Sem qtd informada → transfere a carteira ativa inteira daquele pool
+    const carteira = contarCarteira(origem);
+    const qtyDefault = pool === "cpl" ? carteira.cpl : carteira.ncl;
+    const ok = addTempDemandas({
+      responsavel: f.receiver,
+      pool,
+      objeto: `Redistribuição da carteira de ${origem} (férias/indisponível)`,
+      origem,
+      quantidade: f.qty != null && f.qty !== "" ? f.qty : qtyDefault,
+    });
+    if (ok) setRedistForm(prev => { const n = { ...prev }; delete n[key]; return n; });
+  }
+  function removerTempDemanda(id) {
+    const next = tempDemandas.filter(t => t.id !== id);
+    setTempDemandas(next);
+    if (recsNCL.length > 0 || recsCPL.length > 0) gerarRecs(next);
+  }
+  function limparTempDemandas() {
+    setTempDemandas([]);
+    if (recsNCL.length > 0 || recsCPL.length > 0) gerarRecs([]);
+  }
   function limparDemanda() {
-    setDem({ area: "", modalidade: "", objeto: "" });
+    setDem({ area: "", modalidade: "", objeto: "", ignorarMod: false });
     setRecsNCL([]);
     setRecsCPL([]);
+    setVerRankingCompleto(false);
+  }
+  function toggleIgnorado(nome) {
+    setComprIgnorados(prev => {
+      const next = new Set(prev);
+      if (next.has(nome)) next.delete(nome); else next.add(nome);
+      return next;
+    });
   }
 
   function crossFilter(key, val) { if (key === "resp") setFComp(val); if (key === "area") setFArea(val); if (key === "mod") setFMod(val); }
@@ -3956,10 +4441,12 @@ PERGUNTA DO USUÁRIO: ${q}`;
       ["processos","list","Processos",fBase.length],
       ["metro","subway","Linha do Metrô",null],
       ["dirTimeline","clock","Timeline",null],
+      ["projetos","calendar","Acompanhamento de Projetos",null],
     ]},
     { label: "Riscos & Alertas", items: [
       ["alertaSD","doc","Alerta Pré-compra",alertSD.length],
       ["alertaRC","shield","Alerta RC",alertRC.length],
+      ["fracionamento","trend","Fracionamento (MXM)",null],
     ]},
     ...(iaDisponivel ? [{ label: "Inteligência", items: [["iaInsights","spark","IA Insights",null]] }] : []),
   ] : [
@@ -3968,6 +4455,7 @@ PERGUNTA DO USUÁRIO: ${q}`;
       ["overview","grid","Visão Geral",null],
       ["executivo","spark","Executivo",null],
       ["operacional","chart","Operacional",null],
+      ["fracionamento","trend","Fracionamento (MXM)",null],
       ...(isAdminMaster && iaDisponivel ? [["iaInsights","spark","IA Insights",null]] : []),
     ]},
     { label: "Processos", items: [
@@ -3975,6 +4463,7 @@ PERGUNTA DO USUÁRIO: ${q}`;
       ["metro","subway","Linha do Metrô",null],
       ["dirTimeline","clock","Timeline",null],
       ["cronograma","calendar","Cronograma",null],
+      ["projetos","calendar","Acompanhamento de Projetos",null],
     ]},
     { label: "Riscos & Alertas", items: [
       ["alertas","alert","Alertas",(alertNCL.length+alertCPL.length)],
@@ -3989,6 +4478,7 @@ PERGUNTA DO USUÁRIO: ${q}`;
     ]}] : []),
     ...(isAdminMaster ? [{ label: "Administração", items: [
       ["geradorSenha","key","Gerador de Senha",null],
+      ["relCustom","doc","Relatório Customizado",null],
     ]}] : []),
   ];
 
@@ -3999,7 +4489,9 @@ PERGUNTA DO USUÁRIO: ${q}`;
     alertas: "Alertas", alertaSD: "Alerta Pré-compra", alertaRC: "Alerta RC", mapeamento: "Mapeamento",
     gestao: "Performance", planejamento: "Planejamento", pantanal: "Pantanal", nova: "Nova Demanda",
     bal: "Balanceamento", dirHome: "Painel Diretoria", dirDiag: "Diagnóstico",
-    iaInsights: "IA Insights", geradorSenha: "Gerador de Senha",
+    iaInsights: "IA Insights", geradorSenha: "Gerador de Senha", relCustom: "Relatório Customizado",
+    projetos: "Acompanhamento de Projetos",
+    fracionamento: "Fracionamento (MXM)",
   };
 
   return (
@@ -4757,7 +5249,7 @@ PERGUNTA DO USUÁRIO: ${q}`;
                       </div>
                       <div onClick={() => openDrill(`Diagnóstico Diretoria — Pré-compra acima do prazo (${scopeLabel})`, diag.sdTriagem.filter(r => r.atrasoSD))}
                         style={{ borderRadius: 12, border: "1px solid #c0392b33", background: "#c0392b12", padding: "10px 12px", cursor: diag.sdTriagem.filter(r => r.atrasoSD).length > 0 ? "pointer" : "default" }}>
-                        <div style={{ fontSize: 10, color: "#c0392b", fontWeight: 700, textTransform: "uppercase" }}>Pré-compra > {PRAZO_SD} d.u.</div>
+                        <div style={{ fontSize: 10, color: "#c0392b", fontWeight: 700, textTransform: "uppercase" }}>Pré-compra &gt; {PRAZO_SD} d.u.</div>
                         <div style={{ fontSize: 24, fontWeight: 800, color: "#c0392b", marginTop: 4 }}>{diag.sdTriagem.filter(r => r.atrasoSD).length}</div>
                       </div>
                     </div>
@@ -6281,7 +6773,9 @@ PERGUNTA DO USUÁRIO: ${q}`;
                       <span style={{ fontSize: 10, fontWeight: 600, color: "var(--gaq-text-3)", textTransform: "uppercase", textAlign: "right" }}>Média d.u.</span>
                     </div>
                     {executiveStrategic.buyerRanking.map((b, idx) => (
-                      <div key={b.nome} style={{ display: "grid", gridTemplateColumns: "28px 1fr 70px 70px", gap: 8, padding: "8px 0", borderBottom: "1px solid var(--gaq-line)", alignItems: "center" }}>
+                      <div key={b.nome}
+                        onClick={() => setDrillDown({ title: `Executivo — Demandas NCL em andamento de ${b.nome}`, data: b.rows || [], color: "#1f6feb", sourceAba: "executivo" })}
+                        style={{ display: "grid", gridTemplateColumns: "28px 1fr 70px 70px", gap: 8, padding: "8px 0", borderBottom: "1px solid var(--gaq-line)", alignItems: "center", cursor: "pointer" }}>
                         <span style={{ fontSize: 11, fontWeight: 700, color: "var(--gaq-text-3)" }}>{idx + 1}</span>
                         <span style={{ fontSize: 12.5, fontWeight: 500, color: "var(--gaq-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.nome}</span>
                         <span className="gaq-num" style={{ fontSize: 13, fontWeight: 700, textAlign: "right", color: "var(--gaq-blue)" }}>{b.demandas}</span>
@@ -6340,6 +6834,79 @@ PERGUNTA DO USUÁRIO: ${q}`;
                   </div>}
             </div>
           </div>}
+
+          {/* Pré-compra (SD sem RC) por Responsável NCL — gráfico à parte */}
+          {!loginArea && (() => {
+            const byResp = executiveStrategic.preCompraByResp || [];
+            const total = executiveStrategic.preCompraTotal || 0;
+            const maxT = byResp.reduce((m, p) => Math.max(m, p.total), 0) || 1;
+            const COR_AN = "#e67e22", COR_OK = "#27ae60", COR_OU = "#c0392b";
+            const temOutros = byResp.some(p => p.outros > 0);
+            const drill = (title, rows, color) => { if (rows && rows.length) setDrillDown({ title, data: rows, color, sourceAba: "executivo" }); };
+            const dot = (cor) => ({ width: 9, height: 9, borderRadius: 2, background: cor, display: "inline-block", marginRight: 5 });
+            return (
+              <div className="gaq-card" style={{ padding: 22, marginBottom: 16 }}>
+                <div className="gaq-section-h">
+                  <div>
+                    <div className="gaq-h3" style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                      Pré-compra · Service Desk sem RC — por Responsável (NCL)
+                      <span className="kpi-tooltip" style={{ display: "inline-flex" }}>
+                        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 16, height: 16, borderRadius: "50%", background: "var(--gaq-blue)", color: "#fff", fontSize: 11, fontWeight: 700, fontStyle: "italic", lineHeight: 1, cursor: "help" }}>i</span>
+                        <span className="kpi-tip" style={{ width: 320, textAlign: "left" }}>
+                          <b>Regras deste gráfico:</b><br/>
+                          • <b>O que entra:</b> processos com nº de SD e ainda SEM RC vinculada (pré-compra na mão do comprador), agrupados pelo responsável NCL (Comprador, ou Avaliador quando não há Comprador).<br/>
+                          • <b>Em análise:</b> SD ainda em aberto. <b>Concluído:</b> SD encerrado mas sem RC aberta (pelo status do JSON ou pela data de encerramento no log).<br/>
+                          • A soma de todos os responsáveis = total da carteira sem RC. Clique no nome/barra ou em cada número para abrir a lista.
+                        </span>
+                      </span>
+                    </div>
+                    <div className="sub">Carteira de pré-compra (SD sem RC) distribuída por responsável. Clique para detalhar.</div>
+                  </div>
+                  <span className="gaq-meta">{total} processo(s)</span>
+                </div>
+                <div style={{ display: "flex", gap: 16, margin: "6px 0 12px", fontSize: 11, color: "var(--gaq-text-3)", flexWrap: "wrap" }}>
+                  <span style={{ display: "inline-flex", alignItems: "center" }}><span style={dot(COR_AN)} />Em análise</span>
+                  <span style={{ display: "inline-flex", alignItems: "center" }}><span style={dot(COR_OK)} />Concluído (sem RC)</span>
+                  {temOutros && <span style={{ display: "inline-flex", alignItems: "center" }}><span style={dot(COR_OU)} />Outros status</span>}
+                </div>
+                {byResp.length === 0
+                  ? <div style={{ color: "var(--gaq-text-3)", fontSize: 13, paddingTop: 8 }}>Nenhum processo em pré-compra (SD sem RC) no recorte actual.</div>
+                  : <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+                      {byResp.map(p => {
+                        const wTotal = Math.max((p.total / maxT) * 100, 6);
+                        return (
+                          <div key={p.nome}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+                              <span onClick={() => drill(`Executivo — ${p.nome}: Pré-compra (SD sem RC)`, p.rows, COR_AN)}
+                                style={{ fontSize: 12.5, fontWeight: 600, color: "var(--gaq-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer" }}>{p.nome}</span>
+                              <span className="gaq-num" style={{ fontSize: 11.5, whiteSpace: "nowrap" }}>
+                                <span onClick={() => drill(`Executivo — ${p.nome}: SD em análise`, p.emAnaliseRows, COR_AN)}
+                                  style={{ color: COR_AN, fontWeight: 700, cursor: p.emAnalise ? "pointer" : "default" }}>{p.emAnalise} análise</span>
+                                <span style={{ color: "var(--gaq-text-3)" }}> · </span>
+                                <span onClick={() => drill(`Executivo — ${p.nome}: SD concluído (sem RC)`, p.concluidoRows, COR_OK)}
+                                  style={{ color: COR_OK, fontWeight: 700, cursor: p.concluido ? "pointer" : "default" }}>{p.concluido} concl.</span>
+                                {p.outros > 0 && <>
+                                  <span style={{ color: "var(--gaq-text-3)" }}> · </span>
+                                  <span onClick={() => drill(`Executivo — ${p.nome}: SD outros status`, p.outrosRows, COR_OU)}
+                                    style={{ color: COR_OU, fontWeight: 700, cursor: "pointer" }}>{p.outros} outros</span>
+                                </>}
+                                <span style={{ color: "var(--gaq-text-3)", fontWeight: 500 }}>&nbsp;&nbsp;({p.total})</span>
+                              </span>
+                            </div>
+                            <div onClick={() => drill(`Executivo — ${p.nome}: Pré-compra (SD sem RC)`, p.rows, COR_AN)}
+                              title={`${p.nome}: ${p.total} processo(s)`}
+                              style={{ display: "flex", width: `${wTotal}%`, minWidth: 60, height: 12, background: "rgba(15,23,42,0.06)", borderRadius: 999, overflow: "hidden", cursor: "pointer" }}>
+                              {p.emAnalise > 0 && <div style={{ width: `${(p.emAnalise / p.total) * 100}%`, height: "100%", background: COR_AN, flexShrink: 0 }} />}
+                              {p.concluido > 0 && <div style={{ width: `${(p.concluido / p.total) * 100}%`, height: "100%", background: COR_OK, flexShrink: 0 }} />}
+                              {p.outros > 0 && <div style={{ width: `${(p.outros / p.total) * 100}%`, height: "100%", background: COR_OU, flexShrink: 0 }} />}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>}
+              </div>
+            );
+          })()}
 
           {false && <>
 
@@ -6789,6 +7356,12 @@ PERGUNTA DO USUÁRIO: ${q}`;
             r.diasParaEntrega !== null  && r.diasParaEntrega >= 0
           ).sort((a, b) => a.diasParaEntrega - b.diasParaEntrega);
 
+          // Todos os processos com entrega no mês selecionado (inclui vencidos)
+          const procDoMes = procEntregas.filter(r =>
+            r.dataEntrega.getFullYear() === calMes.y &&
+            r.dataEntrega.getMonth()    === calMes.m
+          ).sort((a, b) => a.dataEntrega - b.dataEntrega);
+
           return <div className="anim-fade">
             {/* Header */}
             <div style={{ marginBottom: 18 }}>
@@ -6819,6 +7392,73 @@ PERGUNTA DO USUÁRIO: ${q}`;
                 <div className="gaq-h3" style={{ textTransform: "capitalize" }}>{nomeMes}</div>
                 <button onClick={() => { setCalMes(p => { const d = new Date(p.y, p.m + 1, 1); return { y: d.getFullYear(), m: d.getMonth() }; }); setCalDiaSel(null); }}
                   className="gaq-btn" style={{ fontSize: 14 }}>›</button>
+              </div>
+              {/* Toolbar do mês selecionado: total + ações (PDF / e-mail) */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 16, padding: "10px 14px", borderRadius: 10, background: "var(--card2)", border: "1px solid var(--border2)" }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                  <span style={{ fontSize: 11, color: "var(--text3)", textTransform: "uppercase", fontWeight: 600, letterSpacing: ".04em" }}>Total no mês</span>
+                  <span style={{ fontSize: 22, fontWeight: 800, color: "#e67e22", lineHeight: 1 }}>{procDoMes.length}</span>
+                  <span style={{ fontSize: 11, color: "var(--text3)" }}>processo(s) com entrega prevista</span>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="gaq-btn no-print" disabled={procDoMes.length === 0} onClick={() => {
+                    const html = gerarRelatorioCronograma({ processos: procDoMes, mes: calMes.m, ano: calMes.y, area: fArea || "Todas as Áreas", meta });
+                    const win = window.open("", "_blank");
+                    win.document.write(html);
+                    win.document.close();
+                  }} title="Gera PDF do cronograma do mês selecionado">
+                    <Icon name="doc" size={14}/> Gerar Relatório
+                  </button>
+                  <button className="gaq-btn no-print" disabled={procDoMes.length === 0} onClick={() => {
+                    const area = fArea || "Todas as Áreas";
+                    const MESES_PT = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+                    const nomeMesPt = MESES_PT[calMes.m] + " de " + calMes.y;
+                    const html = gerarRelatorioCronograma({ processos: procDoMes, mes: calMes.m, ano: calMes.y, area, meta });
+                    const win = window.open("", "_blank");
+                    win.document.write(html);
+                    win.document.close();
+                    const venc = procDoMes.filter(r => r.diasParaEntrega !== null && r.diasParaEntrega < 0).length;
+                    const ate7 = procDoMes.filter(r => r.diasParaEntrega !== null && r.diasParaEntrega >= 0 && r.diasParaEntrega <= 7).length;
+                    const ate30 = procDoMes.filter(r => r.diasParaEntrega !== null && r.diasParaEntrega > 7 && r.diasParaEntrega <= 30).length;
+                    const futs = procDoMes.filter(r => r.diasParaEntrega !== null && r.diasParaEntrega > 30).length;
+                    const subject = `Cronograma de Entregas — ${nomeMesPt} — ${area}`;
+                    const linhasProc = procDoMes.slice(0, 30).map(r => {
+                      const d = r.dataEntrega.toLocaleDateString("pt-BR");
+                      const id = r.NumRC || r.TicketSD || "—";
+                      const ar = r["Área Requisitante"] || "—";
+                      const obj = (r.Objeto || "").slice(0, 80);
+                      const sit = r.diasParaEntrega < 0 ? `vencido há ${Math.abs(r.diasParaEntrega)}d` : `em ${r.diasParaEntrega}d`;
+                      return `- ${d} · ${id} · ${ar} · ${sit} · ${obj}`;
+                    }).join("\n");
+                    const body =
+`Prezados,
+
+Segue o cronograma de entregas previstas para ${nomeMesPt}.
+
+Área: ${area}
+Total no mês: ${procDoMes.length} processo(s)
+- Vencidos: ${venc}
+- Próximos 7 dias: ${ate7}
+- 8 a 30 dias: ${ate30}
+- Mais de 30 dias: ${futs}
+
+${procDoMes.length > 30 ? "Primeiros 30 processos (relatório completo em anexo PDF):" : "Processos:"}
+${linhasProc}
+${procDoMes.length > 30 ? `\n... e mais ${procDoMes.length - 30} processo(s) no relatório anexo.` : ""}
+
+Relatório completo em anexo (PDF — gerado em nova aba).
+
+Atenciosamente,
+GAQ — Gerência de Aquisições`;
+                    setTimeout(() => {
+                      const a = document.createElement("a");
+                      a.href = "mailto:?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
+                      a.click();
+                    }, 800);
+                  }} title="Gera o PDF e abre o e-mail com o resumo do mês">
+                    <Icon name="external" size={14}/> Enviar por E-mail
+                  </button>
+                </div>
               </div>
               {/* Cabeçalho dias da semana */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 3 }}>
@@ -7032,6 +7672,158 @@ PERGUNTA DO USUÁRIO: ${q}`;
           </div>;
         })()}
 
+        {/* ════════════ ABA: FRACIONAMENTO (MXM) ════════════ */}
+        {aba === "fracionamento" && (() => {
+          const F = window.__FRACIONAMENTO__;
+          if (!F || !Array.isArray(F.itens) || F.itens.length === 0) {
+            return <div style={{ maxWidth: 620, margin: "60px auto", textAlign: "center", background: "var(--gaq-surface)", border: "1px solid var(--gaq-line)", borderRadius: "var(--gaq-r-xl)", padding: "32px 28px" }}>
+              <div style={{ fontSize: 38 }}>📊</div>
+              <div style={{ fontWeight: 700, fontSize: 16, color: "var(--gaq-text)", marginTop: 8 }}>Base de Fracionamento não carregada</div>
+              <div style={{ fontSize: 12.5, color: "var(--gaq-text-3)", marginTop: 8, lineHeight: 1.6 }}>
+                O arquivo <b>base_fracionamento.js</b> não foi encontrado nesta pasta.<br/>
+                Gere-o rodando <b>gerar_base_fracionamento.ps1</b> (lê a planilha "Base de fracionamento MXM.xlsx") e recarregue a página.
+              </div>
+            </div>;
+          }
+          const brl = (v) => (v == null ? "—" : Number(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 }));
+          const brlShort = (v) => {
+            const n = Number(v) || 0;
+            if (n >= 1e6) return "R$ " + (n / 1e6).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " mi";
+            if (n >= 1e3) return "R$ " + (n / 1e3).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + " mil";
+            return brl(n);
+          };
+          const itens = F.itens;
+          const byDL = (dl) => itens.filter(i => i.dl === dl).slice().sort((a, b) => b.vlrTotal - a.vlrTotal);
+          const dl1 = byDL("DL 1");
+          const dl2 = byDL("DL 2");
+          const T = F.totais || { dl1: { grupos: dl1.length }, dl2: { grupos: dl2.length } };
+          const nExceder = itens.filter(i => i.status === "A EXCEDER").length;
+          const nSemSaldo = itens.filter(i => i.status === "SEM SALDO").length;
+          const statusRows = (dl, st) => itens.filter(i => i.dl === dl && i.status === st).slice().sort((a, b) => b.vlrTotal - a.vlrTotal);
+
+          const DL_COLOR = { "DL 1": "#2e86c1", "DL 2": "#e67e22" };
+          // Login de AREA nao ve valores (R$): so ranking de consumo + status.
+          // Admin, diretoria e usuario individual continuam com valores visiveis.
+          const verValores = !loginArea;
+          const tituloMetrica = verValores ? "Soma de Vlr Total por grupo de cotação" : "Ranking de consumo por grupo de cotação";
+
+          // Tooltip custom: oculta o R$ quando o perfil nao pode ver valores.
+          const tipContent = (props) => {
+            const { active, payload } = props || {};
+            if (!active || !payload || !payload.length) return null;
+            const p = payload[0].payload;
+            return <div style={{ background: "var(--gaq-surface)", border: "1px solid var(--gaq-line)", borderRadius: 6, padding: "6px 9px", fontSize: 11, color: "var(--gaq-text)", boxShadow: "var(--gaq-shadow-2)" }}>
+              <div style={{ fontWeight: 700 }}>{p.cod}</div>
+              <div style={{ color: "var(--gaq-text-3)" }}>{p.desc}</div>
+              {verValores && <div style={{ marginTop: 3, fontWeight: 600 }}>{brl(p.vlr)}</div>}
+            </div>;
+          };
+
+          // Funcao (nao componente): chamada inline evita criar uma nova
+          // identidade de componente a cada render, o que remontava o grafico
+          // e fazia o Recharts reanimar do zero (efeito de "piscar").
+          const fracChart = (titulo, arr, dl) => {
+            const color = DL_COLOR[dl];
+            const data = arr.map(i => ({ name: i.cod + " · " + i.desc, cod: i.cod, desc: i.desc, vlr: i.vlrTotal }));
+            const h = Math.max(260, data.length * 22 + 40);
+            return <div style={{ flex: 1, minWidth: 320, background: "var(--gaq-surface)", border: "1px solid var(--gaq-line)", borderRadius: "var(--gaq-r-xl)", padding: "16px 18px", boxShadow: "var(--gaq-shadow-2)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--gaq-text)" }}>
+                  <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 3, background: color, marginRight: 7 }}></span>
+                  {titulo}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--gaq-text-3)" }}>{arr.length} grupos</div>
+              </div>
+              <div style={{ maxHeight: 540, overflowY: "auto", overflowX: "hidden" }}>
+                <Recharts.ResponsiveContainer width="100%" height={h}>
+                  <Recharts.BarChart data={data} layout="vertical" margin={{ top: 4, right: 24, left: 8, bottom: 4 }}>
+                    <Recharts.CartesianGrid strokeDasharray="3 3" stroke="var(--gaq-line)" horizontal={false} />
+                    <Recharts.YAxis type="category" dataKey="name" fontSize={9.5} width={168} tick={{ fill: "var(--gaq-text-3)" }} tickFormatter={v => v.length > 26 ? v.slice(0, 24) + "…" : v} interval={0} />
+                    <Recharts.XAxis type="number" hide={!verValores} fontSize={9} tick={{ fill: "var(--gaq-text-3)" }} tickFormatter={brlShort} />
+                    <Recharts.Tooltip content={tipContent} cursor={{ fill: color + "11" }} />
+                    <Recharts.Bar dataKey="vlr" name="Vlr Total" fill={color} radius={[0, 3, 3, 0]} barSize={13} isAnimationActive={false} />
+                  </Recharts.BarChart>
+                </Recharts.ResponsiveContainer>
+              </div>
+            </div>;
+          };
+
+          const statusTable = (dl, st, color) => {
+            const rows = statusRows(dl, st);
+            return <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--gaq-text)", marginBottom: 6, display: "flex", alignItems: "center", gap: 7 }}>
+                <span style={{ display: "inline-block", padding: "2px 9px", borderRadius: 999, fontSize: 10, fontWeight: 700, background: color + "22", color: color }}>{st}</span>
+                <span style={{ fontSize: 11, color: "var(--gaq-text-3)", fontWeight: 600 }}>{rows.length} grupo(s)</span>
+              </div>
+              {rows.length === 0
+                ? <div style={{ fontSize: 11.5, color: "var(--gaq-text-3)", fontStyle: "italic", padding: "4px 2px" }}>Nenhum grupo neste status.</div>
+                : <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+                    <thead><tr style={{ textAlign: "left", color: "var(--gaq-text-3)", fontSize: 10.5 }}>
+                      <th style={{ padding: "4px 6px", fontWeight: 600 }}>Cód.</th>
+                      <th style={{ padding: "4px 6px", fontWeight: 600 }}>Grupo de cotação</th>
+                      {verValores && <th style={{ padding: "4px 6px", fontWeight: 600, textAlign: "right" }}>Vlr Total</th>}
+                      {verValores && <th style={{ padding: "4px 6px", fontWeight: 600, textAlign: "right" }}>Vlr Atend.</th>}
+                    </tr></thead>
+                    <tbody>
+                      {rows.map((r, idx) => <tr key={r.cod + idx} style={{ borderTop: "1px solid var(--gaq-line)" }}>
+                        <td style={{ padding: "5px 6px", fontWeight: 700, color: color, whiteSpace: "nowrap" }}>{r.cod}</td>
+                        <td style={{ padding: "5px 6px", color: "var(--gaq-text)" }}>{r.desc}</td>
+                        {verValores && <td style={{ padding: "5px 6px", textAlign: "right", fontWeight: 600, color: "var(--gaq-text)", whiteSpace: "nowrap" }}>{brl(r.vlrTotal)}</td>}
+                        {verValores && <td style={{ padding: "5px 6px", textAlign: "right", color: "var(--gaq-text-3)", whiteSpace: "nowrap" }}>{brl(r.vlrAtend)}</td>}
+                      </tr>)}
+                    </tbody>
+                  </table>}
+            </div>;
+          };
+
+          const statusBlock = (dl) => {
+            const color = DL_COLOR[dl];
+            return <div style={{ flex: 1, minWidth: 320, background: "var(--gaq-surface)", border: "1px solid var(--gaq-line)", borderRadius: "var(--gaq-r-xl)", padding: "16px 18px", boxShadow: "var(--gaq-shadow-2)" }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--gaq-text)", marginBottom: 12 }}>
+                <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 3, background: color, marginRight: 7 }}></span>
+                {dl === "DL 1" ? "DL I" : "DL II"} — Atenção
+              </div>
+              {statusTable(dl, "A EXCEDER", "#d4a017")}
+              {statusTable(dl, "SEM SALDO", "#e74c3c")}
+            </div>;
+          };
+
+          const kpi = (v, l, sub, c) => <div style={{ flex: 1, minWidth: 140, background: "var(--gaq-surface)", border: "1px solid var(--gaq-line)", borderTop: "3px solid " + c, borderRadius: "var(--gaq-r-lg)", padding: "14px 16px", boxShadow: "var(--gaq-shadow-2)" }}>
+            <div style={{ fontSize: 24, fontWeight: 800, color: c, lineHeight: 1.1 }}>{v}</div>
+            <div style={{ fontSize: 10.5, color: "var(--gaq-text-3)", fontWeight: 600, textTransform: "uppercase", marginTop: 3 }}>{l}</div>
+            {sub && <div style={{ fontSize: 11, color: "var(--gaq-text-3)", marginTop: 3 }}>{sub}</div>}
+          </div>;
+
+          return <div className="anim-fade">
+            <div style={{ background: "var(--gaq-surface)", borderRadius: "var(--gaq-r-xl)", padding: "24px 28px", marginBottom: 18, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, border: "1px solid var(--gaq-line)", boxShadow: "var(--gaq-shadow-2)" }}>
+              <div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: "var(--gaq-text)", letterSpacing: "-0.02em" }}>Base de Fracionamento (MXM)</div>
+                <div style={{ fontSize: 12, color: "var(--gaq-text-3)", marginTop: 2 }}>{tituloMetrica} · DL I e DL II apartados · Fonte: {F.fonte}{F.gerado ? " · atualizado em " + F.gerado : ""}</div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
+              {kpi(T.grupos != null ? T.grupos : itens.length, "Grupos de cotação", null, "#1a5276")}
+              {kpi(T.dl1 ? T.dl1.grupos : dl1.length, "DL I", verValores && T.dl1 ? brlShort(T.dl1.vlrTotal) : null, "#2e86c1")}
+              {kpi(T.dl2 ? T.dl2.grupos : dl2.length, "DL II", verValores && T.dl2 ? brlShort(T.dl2.vlrTotal) : null, "#e67e22")}
+              {kpi(nExceder, "A Exceder", null, "#d4a017")}
+              {kpi(nSemSaldo, "Sem Saldo", null, "#e74c3c")}
+            </div>
+
+            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--gaq-text)", margin: "0 0 10px 2px" }}>{tituloMetrica}</div>
+            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 22 }}>
+              {fracChart("DL I", dl1, "DL 1")}
+              {fracChart("DL II", dl2, "DL 2")}
+            </div>
+
+            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--gaq-text)", margin: "0 0 10px 2px" }}>Status — A Exceder e Sem Saldo</div>
+            <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+              {statusBlock("DL 1")}
+              {statusBlock("DL 2")}
+            </div>
+          </div>;
+        })()}
+
         {/* ════════════ ABA: OPERACIONAL ════════════ */}
         {aba === "operacional" && (base.length > 0 ? <div className="anim-fade">
           <div style={{ background: "var(--gaq-surface)", borderRadius: "var(--gaq-r-xl)", padding: "24px 28px", marginBottom: 18, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, border: "1px solid var(--gaq-line)", boxShadow: "var(--gaq-shadow-2)" }}>
@@ -7049,13 +7841,7 @@ PERGUNTA DO USUÁRIO: ${q}`;
               }} title="Gerar PDF com os filtros ativos">
                 <Icon name="doc" size={14}/> PDF Operacional
               </button>
-              <button className="gaq-btn no-print" onClick={() => {
-                const tituloArea = fArea || "Todas as Áreas";
-                const html = gerarRelatorioGAQSexta({ processos: fBase, area: tituloArea, meta, fBase });
-                const win = window.open("", "_blank");
-                win.document.write(html);
-                win.document.close();
-              }} title="Gerar relatório GAQ do filtro atual">
+              <button className="gaq-btn no-print" onClick={() => setShowGaqSextaEditor(true)} title="Revisar status/observações e gerar o relatório GAQ do filtro atual">
                 <Icon name="doc" size={14}/> GAQ Sexta
               </button>
               <button className="gaq-btn no-print" onClick={() => {
@@ -7428,7 +8214,7 @@ GAQ — Gerência de Aquisições`;
               const anoModMap  = {};
               fBase.forEach(r => {
                 if (r.isCanceled || r.isFailed) return;
-                const dataRef = r.aberturaSD || r.aberturaRC;
+                const dataRef = r.aberturaRC || r.aberturaSD;
                 if (!dataRef || !(dataRef instanceof Date)) return;
                 const ano  = String(dataRef.getFullYear());
                 const _validResp = v => { if (!v) return false; const n = nrm(v.trim()); return n && n !== "n/a" && n !== "n/i" && !n.includes("nao aplic") && !n.includes("não aplic"); };
@@ -7460,14 +8246,10 @@ GAQ — Gerência de Aquisições`;
               };
 
               // ── Compradores ──
-              // totais históricos (todos os recentAnos) → usados nas pills e no total do subtítulo
-              const buyerTotalsAll = {};
-              recentAnos.forEach(ano => Object.entries(anoCompMap[ano]||{}).forEach(([c,n]) => { buyerTotalsAll[c]=(buyerTotalsAll[c]||0)+n; }));
-              const buyerTotal = Object.values(buyerTotalsAll).reduce((a,b)=>a+b,0);
-
               // totais dos anos selecionados → determinam quem entra no top e a ordenação
               const buyerTotalsDisplay = {};
               displayAnos.forEach(ano => Object.entries(anoCompMap[ano]||{}).forEach(([c,n]) => { buyerTotalsDisplay[c]=(buyerTotalsDisplay[c]||0)+n; }));
+              const buyerTotal = Object.values(buyerTotalsDisplay).reduce((a,b)=>a+b,0);
               const topBuyers = Object.entries(buyerTotalsDisplay).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([n])=>n);
 
               const buyerData  = topBuyers.map(b => {
@@ -7478,13 +8260,9 @@ GAQ — Gerência de Aquisições`;
               }).sort((a,b)=>b._tot-a._tot);
 
               // ── Modalidades ──
-              // mesmo padrão: totais históricos para pills, totais do período para ranking
-              const modTotalsAll = {};
-              recentAnos.forEach(ano => Object.entries(anoModMap[ano]||{}).forEach(([m,n]) => { modTotalsAll[m]=(modTotalsAll[m]||0)+n; }));
-              const modTotal = Object.values(modTotalsAll).reduce((a,b)=>a+b,0);
-
               const modTotalsDisplay = {};
               displayAnos.forEach(ano => Object.entries(anoModMap[ano]||{}).forEach(([m,n]) => { modTotalsDisplay[m]=(modTotalsDisplay[m]||0)+n; }));
+              const modTotal = Object.values(modTotalsDisplay).reduce((a,b)=>a+b,0);
               const topMods = Object.entries(modTotalsDisplay).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([n])=>n);
 
               const modData  = topMods.map(m => {
@@ -7557,7 +8335,7 @@ GAQ — Gerência de Aquisições`;
                   <div className="gaq-card" style={{ padding:22, borderRadius:24 }}>
                     <div style={{ fontWeight:700, fontSize:15, color:"var(--gaq-text)", marginBottom:2 }}>Distribuição por comprador</div>
                     <div style={{ fontSize:11, color:"var(--gaq-text-3)", marginBottom:10 }}>
-                      Processos encaminhados · data ref.: abertura SD ou RC · <b style={{ color:"var(--gaq-text-2)" }}>{buyerTotal}</b> total
+                      Processos encaminhados · data ref.: RC; se não houver, abertura SD · <b style={{ color:"var(--gaq-text-2)" }}>{buyerTotal}</b> total
                     </div>
                     <YearLegend />
                     <Recharts.ResponsiveContainer width="100%" height={bChartH}>
@@ -7575,7 +8353,7 @@ GAQ — Gerência de Aquisições`;
                         ))}
                       </Recharts.BarChart>
                     </Recharts.ResponsiveContainer>
-                    <Pills items={topBuyers} totals={buyerTotalsAll} total={buyerTotal} labelFn={shortName} />
+                    <Pills items={topBuyers} totals={buyerTotalsDisplay} total={buyerTotal} labelFn={shortName} />
                   </div>
 
                   {/* ─ Card: Por Modalidade ─ */}
@@ -7600,7 +8378,7 @@ GAQ — Gerência de Aquisições`;
                         ))}
                       </Recharts.BarChart>
                     </Recharts.ResponsiveContainer>
-                    <Pills items={topMods} totals={modTotalsAll} total={modTotal} />
+                    <Pills items={topMods} totals={modTotalsDisplay} total={modTotal} />
                   </div>
 
                 </div>
@@ -7848,17 +8626,198 @@ GAQ — Gerência de Aquisições`;
               <div><label style={{ fontSize: 11, color: "var(--text3)" }}>Área Requisitante</label>
                 <select value={dem.area} onChange={e => setDem({ ...dem, area: e.target.value })} style={{ width: "100%", padding: "7px", borderRadius: 6, border: "1px solid var(--input-bd)", marginTop: 3, fontSize: 12, background: "var(--input-bg)", color: "var(--text)" }}>
                   <option value="">Selecione...</option>{areas.map(a => <option key={a} value={a}>{a}</option>)}</select></div>
-              <div><label style={{ fontSize: 11, color: "var(--text3)" }}>Modalidade</label>
-                <select value={dem.modalidade} onChange={e => setDem({ ...dem, modalidade: e.target.value })} style={{ width: "100%", padding: "7px", borderRadius: 6, border: "1px solid var(--input-bd)", marginTop: 3, fontSize: 12, background: "var(--input-bg)", color: "var(--text)" }}>
-                  <option value="">Selecione...</option>{mods.map(m => <option key={m} value={m}>{m}</option>)}</select></div>
+              <div>
+                <label style={{ fontSize: 11, color: "var(--text3)" }}>Modalidade</label>
+                <select value={dem.modalidade} onChange={e => setDem({ ...dem, modalidade: e.target.value })}
+                  disabled={dem.ignorarMod}
+                  style={{ width: "100%", padding: "7px", borderRadius: 6, border: "1px solid var(--input-bd)", marginTop: 3, fontSize: 12, background: "var(--input-bg)", color: "var(--text)", opacity: dem.ignorarMod ? 0.5 : 1 }}>
+                  <option value="">Selecione...</option>{mods.map(m => <option key={m} value={m}>{m}</option>)}</select>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5, fontSize: 11, color: "var(--text3)", cursor: "pointer" }}>
+                  <input type="checkbox" checked={!!dem.ignorarMod}
+                    onChange={e => setDem({ ...dem, ignorarMod: e.target.checked, modalidade: e.target.checked ? "" : dem.modalidade })} />
+                  Não sei a modalidade (ignorar indicador)
+                </label>
+              </div>
               <div><label style={{ fontSize: 11, color: "var(--text3)" }}>Objeto</label>
                 <input value={dem.objeto} onChange={e => setDem({ ...dem, objeto: e.target.value })} placeholder="Ex: Aquisição de materiais de escritório..."
                   style={{ width: "100%", padding: "7px", borderRadius: 6, border: "1px solid var(--input-bd)", marginTop: 3, fontSize: 12, background: "var(--input-bg)", color: "var(--text)" }} /></div>
             </div>
-            <button onClick={gerarRecs} disabled={base.length === 0}
+            {/* Compradores indisponíveis (férias, atestado etc.) */}
+            {(compsNCLPool.length > 0 || compsCPLPool.length > 0) && (
+              <div style={{ marginTop: 14, padding: "12px 14px", background: "var(--card2)", border: "1px solid var(--input-bd)", borderRadius: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>Indisponíveis (férias, atestado etc.)</div>
+                    <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 2 }}>
+                      Clique para excluir alguém da sugestão. {comprIgnorados.size > 0 && <b style={{ color: "#c0392b" }}>{comprIgnorados.size} pessoa(s) marcada(s)</b>}
+                    </div>
+                  </div>
+                  {comprIgnorados.size > 0 && (
+                    <button onClick={() => setComprIgnorados(new Set())}
+                      style={{ background: "none", border: "1px solid var(--input-bd)", color: "var(--text2)", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                      Limpar marcações
+                    </button>
+                  )}
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {[...new Set([...compsNCLPool, ...compsCPLPool])].sort((a, b) => a.localeCompare(b, "pt-BR")).map(nome => {
+                    const ign = comprIgnorados.has(nome);
+                    return (
+                      <button key={nome} onClick={() => toggleIgnorado(nome)}
+                        title={ign ? "Clique para reincluir" : "Clique para marcar como indisponível"}
+                        style={{
+                          background: ign ? "#fde2e2" : "var(--card)",
+                          color: ign ? "#c0392b" : "var(--text2)",
+                          border: ign ? "1px solid #c0392b" : "1px solid var(--input-bd)",
+                          borderRadius: 999, padding: "4px 12px", fontSize: 11, fontWeight: 600,
+                          cursor: "pointer", textDecoration: ign ? "line-through" : "none",
+                        }}>
+                        {ign ? "✕ " : ""}{nome}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {/* Redistribuir carteira de quem está de férias/indisponível (opcional) */}
+            {comprIgnorados.size > 0 && (() => {
+              const inp = { padding: "6px 7px", borderRadius: 6, border: "1px solid var(--input-bd)", fontSize: 11.5, background: "var(--input-bg)", color: "var(--text)" };
+              const ignorados = [...comprIgnorados].sort((a, b) => a.localeCompare(b, "pt-BR"));
+              const setRF = (key, patch) => setRedistForm(prev => ({ ...prev, [key]: { ...(prev[key] || {}), ...patch } }));
+              const linhas = [];
+              ignorados.forEach(nome => {
+                const c = contarCarteira(nome);
+                [["ncl", c.ncl, compsNCLPool], ["cpl", c.cpl, compsCPLPool]].forEach(([pool, qtd, poolMembers]) => {
+                  if (qtd <= 0) return;
+                  const key = `${nome}|${pool}`;
+                  const f = redistForm[key] || {};
+                  const receivers = poolMembers.filter(p => p !== nome && !comprIgnorados.has(p)).sort((a, b) => a.localeCompare(b, "pt-BR"));
+                  linhas.push(
+                    <div key={key} style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", padding: "8px 10px", background: "var(--card)", borderRadius: 7, border: "1px solid var(--input-bd)" }}>
+                      <div style={{ flex: "1 1 180px", fontSize: 12, color: "var(--text)" }}>
+                        <b>{nome}</b> <span style={{ color: pool === "cpl" ? "#8e44ad" : "#1a5276", fontSize: 10, fontWeight: 700 }}>{pool.toUpperCase()}</span>
+                        <span style={{ color: "var(--text3)", marginLeft: 6 }}>{qtd} ativo(s)</span>
+                      </div>
+                      <span style={{ fontSize: 11, color: "var(--text3)" }}>→ para</span>
+                      <select value={f.receiver || ""} onChange={e => setRF(key, { receiver: e.target.value })} style={{ ...inp, flex: "1 1 150px" }}>
+                        <option value="">Selecione quem assume...</option>
+                        {receivers.map(p => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                      <label style={{ fontSize: 10.5, color: "var(--text3)" }}>Qtd</label>
+                      <input type="number" min={1} max={99} value={f.qty != null ? f.qty : qtd}
+                        onChange={e => setRF(key, { qty: e.target.value })} style={{ ...inp, width: 60 }} />
+                      <button type="button" onClick={() => redistribuirCarteira(nome, pool)} disabled={!f.receiver}
+                        style={{ background: f.receiver ? "#d35400" : "#bbb", color: "#fff", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 11.5, fontWeight: 700, cursor: f.receiver ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}>
+                        Redistribuir
+                      </button>
+                    </div>
+                  );
+                });
+              });
+              return (
+                <div style={{ marginTop: 12, padding: "12px 14px", background: "var(--card2)", border: "1px solid #e8b88a", borderRadius: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#d35400" }}>Redistribuir carteira de indisponíveis (temporário)</div>
+                  <div style={{ fontSize: 10.5, color: "var(--text3)", margin: "2px 0 10px" }}>
+                    Opcional: transfira a carteira ativa de quem está de férias para outra pessoa. Cria demandas temporárias na conta de quem assume e não altera os dados (JSON).
+                  </div>
+                  {linhas.length > 0
+                    ? <div style={{ display: "grid", gap: 6 }}>{linhas}</div>
+                    : <div style={{ fontSize: 11.5, color: "var(--text3)" }}>As pessoas marcadas não têm carteira ativa para redistribuir.</div>}
+                </div>
+              );
+            })()}
+            <button onClick={() => gerarRecs()} disabled={base.length === 0}
               style={{ marginTop: 14, background: base.length === 0 ? "#aaa" : "#1a5276", color: "#fff", padding: "9px 26px", borderRadius: 8, border: "none", cursor: base.length === 0 ? "not-allowed" : "pointer", fontWeight: 700, fontSize: 13 }}>
               Gerar Recomendações</button>
           </div>
+          {/* Distribuição rápida temporária — só a pessoa é obrigatória */}
+          {base.length > 0 && (() => {
+            const lbl = { fontSize: 10.5, color: "var(--text3)", display: "block", marginBottom: 3 };
+            const inp = { width: "100%", padding: "7px", borderRadius: 6, border: "1px solid var(--input-bd)", fontSize: 12, background: "var(--input-bg)", color: "var(--text)" };
+            const pessoas = [...new Set([...compsNCLPool, ...compsCPLPool])].sort((a, b) => a.localeCompare(b, "pt-BR"));
+            return (
+              <div style={{ background: "var(--card)", borderRadius: 10, padding: 18, boxShadow: "var(--shadow)", marginBottom: 14, borderLeft: "4px solid #16a085" }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#117a65" }}>Distribuição rápida (temporária)</div>
+                <div style={{ fontSize: 10.5, color: "var(--text3)", margin: "2px 0 12px" }}>
+                  Atribua uma demanda direto a alguém — só a <b>pessoa</b> é obrigatória; área, modalidade e objeto são opcionais. Não altera os dados (JSON): vale só nesta sessão e impacta as próximas sugestões.
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                  <div style={{ flex: "2 1 190px" }}>
+                    <label style={lbl}>Pessoa *</label>
+                    <select value={quickTemp.responsavel}
+                      onChange={e => { const v = e.target.value; setQuickTemp(q => ({ ...q, responsavel: v, pool: compsCPLPool.includes(v) && !compsNCLPool.includes(v) ? "cpl" : "ncl" })); }}
+                      style={inp}>
+                      <option value="">Selecione a pessoa...</option>
+                      {pessoas.map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ flex: "0 1 100px" }}>
+                    <label style={lbl}>Pool</label>
+                    <select value={quickTemp.pool || "ncl"} onChange={e => setQuickTemp(q => ({ ...q, pool: e.target.value }))} style={inp}>
+                      <option value="ncl">NCL</option>
+                      <option value="cpl">CPL</option>
+                    </select>
+                  </div>
+                  <div style={{ flex: "0 1 80px" }}>
+                    <label style={lbl}>Qtd</label>
+                    <input type="number" min={1} max={99} value={quickTemp.quantidade}
+                      onChange={e => setQuickTemp(q => ({ ...q, quantidade: e.target.value }))} style={inp} />
+                  </div>
+                  <div style={{ flex: "1 1 150px" }}>
+                    <label style={lbl}>Área (opcional)</label>
+                    <select value={quickTemp.area} onChange={e => setQuickTemp(q => ({ ...q, area: e.target.value }))} style={inp}>
+                      <option value="">—</option>{areas.map(a => <option key={a} value={a}>{a}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ flex: "1 1 150px" }}>
+                    <label style={lbl}>Modalidade (opcional)</label>
+                    <select value={quickTemp.modalidade} onChange={e => setQuickTemp(q => ({ ...q, modalidade: e.target.value }))} style={inp}>
+                      <option value="">—</option>{mods.map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ flex: "2 1 180px" }}>
+                    <label style={lbl}>Objeto (opcional)</label>
+                    <input value={quickTemp.objeto} onChange={e => setQuickTemp(q => ({ ...q, objeto: e.target.value }))} placeholder="Demanda temporária" style={inp} />
+                  </div>
+                  <button type="button" onClick={adicionarQuickTemp} disabled={!quickTemp.responsavel}
+                    style={{ background: quickTemp.responsavel ? "#16a085" : "#aaa", color: "#fff", border: "none", borderRadius: 8, padding: "9px 18px", fontWeight: 700, fontSize: 12.5, cursor: quickTemp.responsavel ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}>
+                    + Adicionar
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+          {tempDemandas.length > 0 && <div style={{ background: "var(--card)", borderRadius: 10, padding: 14, boxShadow: "var(--shadow)", marginBottom: 14, borderLeft: "4px solid #d35400" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#d35400" }}>Demandas temporárias da sessão</div>
+                <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 2 }}>{tempDemandas.length} ajuste(s) impactando as próximas sugestões</div>
+              </div>
+              <button type="button" onClick={limparTempDemandas}
+                style={{ background: "transparent", border: "1px solid #d35400", color: "#d35400", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                Limpar temporárias
+              </button>
+            </div>
+            <div style={{ display: "grid", gap: 6 }}>
+              {tempDemandas.map(t => (
+                <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "7px 10px", background: "var(--card2)", borderRadius: 7 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {t.responsavel} <span style={{ color: t.pool === "cpl" ? "#8e44ad" : "#1a5276", fontSize: 10, textTransform: "uppercase" }}>{t.pool}</span>
+                      {t.origem && <span style={{ marginLeft: 6, background: "#d3540018", color: "#d35400", borderRadius: 4, padding: "1px 6px", fontSize: 9.5, fontWeight: 700, textTransform: "none" }}>férias de {t.origem}</span>}
+                    </div>
+                    <div style={{ fontSize: 10.5, color: "var(--text3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {t.area || "Área n/i"} · {t.modalidade || "Modalidade n/i"} · {(t.objeto || "Demanda temporária").slice(0, 110)}
+                    </div>
+                  </div>
+                  <button type="button" onClick={() => removerTempDemanda(t.id)}
+                    style={{ background: "transparent", border: "none", color: "#c0392b", fontSize: 12, fontWeight: 800, cursor: "pointer", padding: "3px 6px" }}>
+                    Remover
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>}
           {alertMapDem.length > 0 && <div style={{ background: "#fef9e7", border: "2px solid #e67e22", borderRadius: 10, padding: 14, marginBottom: 14 }}>
             <div style={{ fontWeight: 700, color: "#d35400", marginBottom: 6, fontSize: 13 }}>Alerta: Objeto com histórico problemático</div>
             {alertMapDem.map(p => (
@@ -7868,21 +8827,34 @@ GAQ — Gerência de Aquisições`;
               </div>
             ))}
           </div>}
+          {(recsNCL.length > 0 || recsCPL.length > 0) && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, padding: "10px 14px", background: "var(--card2)", borderRadius: 8, flexWrap: "wrap", gap: 8 }}>
+              <div style={{ fontSize: 11.5, color: "var(--text3)" }}>
+                <b style={{ color: "var(--text)" }}>{recsNCL.length}</b> NCL considerado(s) · <b style={{ color: "var(--text)" }}>{recsCPL.length}</b> CPL considerado(s)
+                {comprIgnorados.size > 0 && <> · <b style={{ color: "#c0392b" }}>{comprIgnorados.size} ignorado(s)</b></>}
+                {tempDemandas.length > 0 && <> · <b style={{ color: "#d35400" }}>{tempDemandas.length} temporária(s)</b></>}
+              </div>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--text2)", cursor: "pointer", fontWeight: 600 }}>
+                <input type="checkbox" checked={verRankingCompleto} onChange={e => setVerRankingCompleto(e.target.checked)} />
+                Ver ranking completo (todos os candidatos)
+              </label>
+            </div>
+          )}
           {/* NCL recommendations */}
           {recsNCL.length > 0 && <div style={{ marginBottom: 20 }}>
             <div style={{ fontWeight: 700, fontSize: 14, color: "#1a5276", marginBottom: 10, padding: "8px 14px", background: "#1a527611", borderRadius: 8, border: "2px solid #1a5276" }}>
-              Top 3 Compradores NCL Recomendados
+              {verRankingCompleto ? `Ranking NCL — ${recsNCL.length} candidato(s)` : "Top 3 Compradores NCL Recomendados"}
               <div style={{ fontSize: 10, fontWeight: 400, color: "var(--text3)", marginTop: 2 }}>Núcleo de Compras e Licitações — pool exclusivo NCL</div>
             </div>
-            {recsNCL.map((r, i) => <RecCard key={r.comp} r={r} i={i} pool="ncl" />)}
+            {(verRankingCompleto ? recsNCL : recsNCL.slice(0, 3)).map((r, i) => <RecCard key={r.comp} r={r} i={i} pool="ncl" dem={dem} onTempAssign={registrarTempDemanda} />)}
           </div>}
           {/* CPL recommendations */}
           {recsCPL.length > 0 && <div>
             <div style={{ fontWeight: 700, fontSize: 14, color: "#8e44ad", marginBottom: 10, padding: "8px 14px", background: "#8e44ad11", borderRadius: 8, border: "2px solid #8e44ad" }}>
-              Top 3 Responsáveis CPL Recomendados
+              {verRankingCompleto ? `Ranking CPL — ${recsCPL.length} candidato(s)` : "Top 3 Responsáveis CPL Recomendados"}
               <div style={{ fontSize: 10, fontWeight: 400, color: "var(--text3)", marginTop: 2 }}>Comissão Permanente de Licitações — pool exclusivo CPL</div>
             </div>
-            {recsCPL.map((r, i) => <RecCard key={r.comp} r={r} i={i} pool="cpl" />)}
+            {(verRankingCompleto ? recsCPL : recsCPL.slice(0, 3)).map((r, i) => <RecCard key={r.comp} r={r} i={i} pool="cpl" dem={dem} onTempAssign={registrarTempDemanda} />)}
           </div>}
         </div>}
 
@@ -7920,6 +8892,231 @@ GAQ — Gerência de Aquisições`;
             </div>
           ))}
         </div>}
+
+        {/* ════════════ ABA: ACOMPANHAMENTO DE PROJETOS ════════════ */}
+        {aba === "projetos" && (() => {
+          const hoje0 = new Date(); hoje0.setHours(0,0,0,0);
+          // Recorte por perfil: perfil de Área vê só processos da sua área;
+          // perfil de Diretor com área selecionada idem. Admin/Comprador veem tudo.
+          const areaFilter = loginArea || (isDiretor && dirAreaSel) || null;
+          const baseScope = areaFilter
+            ? base.filter(r => nrm(r["Área Requisitante"] || r.Area || r["ÁREA"] || "").includes(nrm(areaFilter)))
+            : base;
+          // Agrupar processos por tag (campo PROJETO / EVENTO / AÇÃO)
+          const buckets = {};
+          baseScope.forEach(r => {
+            const t = (r["PROJETO / EVENTO / AÇÃO"] || "").toString().trim();
+            if (!t) return;
+            if (!buckets[t]) buckets[t] = [];
+            buckets[t].push(r);
+          });
+          // Lista de tags presente NO RECORTE atual (não em toda a base)
+          const tags = Object.keys(buckets).sort((a, b) => a.localeCompare(b, "pt-BR"));
+          // Cor por proximidade da entrega
+          const corPorEntrega = dias => {
+            if (dias === null || dias === undefined) return "var(--gaq-text-3)";
+            if (dias < 0)   return "var(--gaq-red)";      // vencida
+            if (dias <= 7)  return "#ff3b30";             // urgente
+            if (dias <= 30) return "var(--gaq-orange)";   // próxima
+            return "var(--gaq-green)";                    // futura
+          };
+          const lista = tags.map(t => {
+            const procs = buckets[t] || [];
+            const emA = procs.filter(r => r.emA).length;
+            const ca = procs.filter(r => r.isCanceled || r.isFailed).length;
+            const co = procs.filter(r => r.isConcluded).length;
+            const cor = TagsManager.getTagColor(t);
+            // Próxima entrega = menor data de entrega FUTURA entre os em andamento;
+            // se nenhuma futura, usa a menor entre as vencidas; senão null.
+            const datasEntrega = procs
+              .filter(r => r.emA && r.dataEntrega instanceof Date)
+              .map(r => r.dataEntrega)
+              .sort((a, b) => a - b);
+            const proxEntrega = datasEntrega[0] || null;
+            const diasProx = proxEntrega ? Math.round((proxEntrega - hoje0) / 86400000) : null;
+            return { tag: t, procs, total: procs.length, emA, ca, co, cor, proxEntrega, diasProx };
+          }).sort((a, b) => {
+            // Ordena por data de entrega mais próxima (ascendente). Sem data vai pro final.
+            if (a.proxEntrega && b.proxEntrega) return a.proxEntrega - b.proxEntrega;
+            if (a.proxEntrega) return -1;
+            if (b.proxEntrega) return 1;
+            return b.total - a.total;
+          });
+          const tagSel = projetoTag && buckets[projetoTag] ? projetoTag : (lista[0] ? lista[0].tag : "");
+          const sel = lista.find(x => x.tag === tagSel) || lista[0] || null;
+
+          if (lista.length === 0) {
+            return (
+              <div className="anim-fade">
+                {renderBuscaPanel()}
+                <div className="gaq-card" style={{ padding: 30, textAlign: "center", color: "var(--gaq-text-3)" }}>
+                  <div style={{ fontSize: 30, marginBottom: 8 }}>📁</div>
+                  <div style={{ fontWeight: 600 }}>
+                    {areaFilter ? `Nenhum projeto/evento informado na área ${areaFilter}.` : "Nenhum projeto/evento informado na base."}
+                  </div>
+                  <div style={{ fontSize: 12, marginTop: 6 }}>
+                    Preencha o campo <b>PROJETO / EVENTO / AÇÃO</b> {areaFilter ? `nos processos da área ${areaFilter}` : "no dados.js"} para acompanhar processos agrupados por iniciativa.
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          return (
+            <div className="anim-fade">
+              {renderBuscaPanel()}
+              <div style={{ marginBottom: 14 }}>
+                <div className="gaq-h1" style={{ marginBottom: 4 }}>Acompanhamento de Projetos</div>
+                <div className="gaq-body" style={{ color: "var(--gaq-text-3)" }}>
+                  Processos agrupados pelo campo <b>PROJETO / EVENTO / AÇÃO</b>
+                  {areaFilter ? <> · recorte da área <b>{areaFilter}</b></> : <> · todas as áreas</>}
+                  {" · "}{lista.length} projeto(s)
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 340px) 1fr", gap: 16, alignItems: "start" }}>
+
+                {/* Lista lateral de projetos */}
+                <div className="gaq-card" style={{ padding: 14, maxHeight: "calc(100vh - 200px)", overflowY: "auto" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--gaq-text-3)", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 8, padding: "0 4px", display: "flex", justifyContent: "space-between" }}>
+                    <span>Projetos / Eventos</span>
+                    <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 500 }}>por entrega ↑</span>
+                  </div>
+                  {lista.map(x => {
+                    const corEnt = corPorEntrega(x.diasProx);
+                    const labelEnt = x.proxEntrega
+                      ? `${x.proxEntrega.toLocaleDateString("pt-BR")} · ${x.diasProx < 0 ? `${-x.diasProx}d atrasada` : x.diasProx === 0 ? "hoje" : `em ${x.diasProx}d`}`
+                      : "sem data de entrega";
+                    return (
+                      <button key={x.tag} onClick={() => setProjetoTag(x.tag)}
+                        className={`gaq-side-item${tagSel === x.tag ? " is-active" : ""}`}
+                        style={{ width: "100%", marginBottom: 4, textAlign: "left", flexDirection: "column", alignItems: "stretch", gap: 4, padding: "8px 10px" }}>
+                        <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                          <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                            <span style={{ width: 8, height: 8, borderRadius: 999, background: x.cor, flexShrink: 0 }}/>
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: tagSel === x.tag ? 700 : 500 }}>{x.tag}</span>
+                          </span>
+                          <span className="gaq-badge is-soft">{x.total}</span>
+                        </span>
+                        <span style={{ fontSize: 10.5, color: corEnt, fontWeight: 600, paddingLeft: 16 }}>
+                          {x.proxEntrega ? "⏱" : "—"} {labelEnt}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Detalhe do projeto selecionado */}
+                {sel && <div>
+                  <div className="gaq-card" style={{ padding: 18, marginBottom: 14 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                          <span style={{ width: 10, height: 10, borderRadius: 999, background: sel.cor }}/>
+                          <div className="gaq-h2" style={{ margin: 0 }}>{sel.tag}</div>
+                        </div>
+                        <div className="gaq-meta">{sel.total} processo(s) · {sel.emA} em andamento · {sel.ca} cancelado(s) · {sel.co} concluído(s)</div>
+                        {sel.proxEntrega && (
+                          <div style={{ marginTop: 6, fontSize: 12, fontWeight: 600, color: corPorEntrega(sel.diasProx) }}>
+                            ⏱ Entrega mais próxima: {sel.proxEntrega.toLocaleDateString("pt-BR")} ({sel.diasProx < 0 ? `${-sel.diasProx}d atrasada` : sel.diasProx === 0 ? "hoje" : `em ${sel.diasProx} dias`})
+                          </div>
+                        )}
+                      </div>
+                      <button className="gaq-btn is-primary" onClick={() => {
+                        const html = gerarRelatorioPorTag({ tag: sel.tag, processos: sel.procs, meta });
+                        const win = window.open("", "_blank");
+                        if (win) { win.document.write(html); win.document.close(); }
+                      }}>
+                        <Icon name="doc" size={14}/> Exportar PDF
+                      </button>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginTop: 14 }}>
+                      <div style={{ background: "var(--gaq-bg-2)", borderRadius: 8, padding: "10px 12px", borderTop: "3px solid var(--gaq-blue)" }}>
+                        <div style={{ fontSize: 22, fontWeight: 800, color: "var(--gaq-blue)" }}>{sel.total}</div>
+                        <div style={{ fontSize: 10, color: "var(--gaq-text-3)", fontWeight: 600, textTransform: "uppercase" }}>Total</div>
+                      </div>
+                      <div style={{ background: "var(--gaq-bg-2)", borderRadius: 8, padding: "10px 12px", borderTop: "3px solid var(--gaq-ncl)" }}>
+                        <div style={{ fontSize: 22, fontWeight: 800, color: "var(--gaq-ncl)" }}>{sel.emA}</div>
+                        <div style={{ fontSize: 10, color: "var(--gaq-text-3)", fontWeight: 600, textTransform: "uppercase" }}>Em andamento</div>
+                      </div>
+                      <div style={{ background: "var(--gaq-bg-2)", borderRadius: 8, padding: "10px 12px", borderTop: "3px solid var(--gaq-red)" }}>
+                        <div style={{ fontSize: 22, fontWeight: 800, color: "var(--gaq-red)" }}>{sel.ca}</div>
+                        <div style={{ fontSize: 10, color: "var(--gaq-text-3)", fontWeight: 600, textTransform: "uppercase" }}>Cancelados</div>
+                      </div>
+                      <div style={{ background: "var(--gaq-bg-2)", borderRadius: 8, padding: "10px 12px", borderTop: "3px solid var(--gaq-green)" }}>
+                        <div style={{ fontSize: 22, fontWeight: 800, color: "var(--gaq-green)" }}>{sel.co}</div>
+                        <div style={{ fontSize: 10, color: "var(--gaq-text-3)", fontWeight: 600, textTransform: "uppercase" }}>Concluídos</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Lista dos processos da tag */}
+                  <div className="gaq-card" style={{ padding: 0, overflow: "hidden" }}>
+                    <div style={{ padding: "12px 18px", borderBottom: "1px solid var(--gaq-line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>Processos vinculados</div>
+                      <span className="gaq-meta">Clique para ver detalhes</span>
+                    </div>
+                    <div style={{ maxHeight: "calc(100vh - 420px)", overflowY: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                        <thead style={{ position: "sticky", top: 0, background: "var(--gaq-bg-2)", zIndex: 1 }}>
+                          <tr>
+                            <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 10.5, color: "var(--gaq-text-3)", fontWeight: 600, textTransform: "uppercase", borderBottom: "1px solid var(--gaq-line)" }}>Entrega ↑</th>
+                            <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 10.5, color: "var(--gaq-text-3)", fontWeight: 600, textTransform: "uppercase", borderBottom: "1px solid var(--gaq-line)" }}>Nº RC</th>
+                            <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 10.5, color: "var(--gaq-text-3)", fontWeight: 600, textTransform: "uppercase", borderBottom: "1px solid var(--gaq-line)" }}>Ticket</th>
+                            <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 10.5, color: "var(--gaq-text-3)", fontWeight: 600, textTransform: "uppercase", borderBottom: "1px solid var(--gaq-line)" }}>Área</th>
+                            <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 10.5, color: "var(--gaq-text-3)", fontWeight: 600, textTransform: "uppercase", borderBottom: "1px solid var(--gaq-line)" }}>Responsável</th>
+                            <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 10.5, color: "var(--gaq-text-3)", fontWeight: 600, textTransform: "uppercase", borderBottom: "1px solid var(--gaq-line)" }}>Objeto</th>
+                            <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 10.5, color: "var(--gaq-text-3)", fontWeight: 600, textTransform: "uppercase", borderBottom: "1px solid var(--gaq-line)" }}>Status</th>
+                            <th style={{ padding: "8px 10px", textAlign: "right", fontSize: 10.5, color: "var(--gaq-text-3)", fontWeight: 600, textTransform: "uppercase", borderBottom: "1px solid var(--gaq-line)" }}>d.u.</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sel.procs
+                            .slice()
+                            .sort((a, b) => {
+                              // Entrega mais próxima primeiro; sem data vai pro fim.
+                              const aD = a.dataEntrega instanceof Date ? a.dataEntrega.getTime() : Infinity;
+                              const bD = b.dataEntrega instanceof Date ? b.dataEntrega.getTime() : Infinity;
+                              if (aD !== bD) return aD - bD;
+                              return (b.diasTotais || 0) - (a.diasTotais || 0);
+                            })
+                            .map(r => {
+                              const resp = r.Comprador || r.Avaliador || r.Pregoeiro || r.cplResp || "—";
+                              const stCol = r.isCanceled || r.isFailed ? "var(--gaq-red)" : r.isConcluded ? "var(--gaq-green)" : r.emA ? "var(--gaq-blue)" : "var(--gaq-text-3)";
+                              const ent = r.dataEntrega instanceof Date ? r.dataEntrega : null;
+                              const dE = ent ? Math.round((ent - hoje0) / 86400000) : null;
+                              const corE = corPorEntrega(dE);
+                              const labelE = ent
+                                ? `${ent.toLocaleDateString("pt-BR")}${r.emA ? ` · ${dE < 0 ? `${-dE}d atrasada` : dE === 0 ? "hoje" : `em ${dE}d`}` : ""}`
+                                : "—";
+                              return (
+                                <tr key={r.ProcessKey} onClick={() => setSelProc(r)}
+                                  style={{ cursor: "pointer", borderBottom: "1px solid var(--gaq-line)" }}>
+                                  <td style={{ padding: "9px 10px", borderLeft: ent && r.emA ? `3px solid ${corE}` : "3px solid transparent" }}>
+                                    <span style={{ fontSize: 11.5, fontWeight: 700, color: ent ? corE : "var(--gaq-text-3)" }}>{labelE}</span>
+                                  </td>
+                                  <td style={{ padding: "9px 10px", fontFamily: "var(--gaq-mono)", fontWeight: 700 }}>{r.NumRC || "—"}</td>
+                                  <td style={{ padding: "9px 10px", fontFamily: "var(--gaq-mono)", fontSize: 11 }}>{r.TicketSD || "—"}</td>
+                                  <td style={{ padding: "9px 10px" }}>{r["Área Requisitante"] || "—"}</td>
+                                  <td style={{ padding: "9px 10px" }}>{resp}</td>
+                                  <td style={{ padding: "9px 10px", maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.Objeto || "—"}</td>
+                                  <td style={{ padding: "9px 10px" }}>
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: stCol, background: stCol + "18", borderRadius: 999, padding: "2px 8px" }}>{r.status || "—"}</span>
+                                  </td>
+                                  <td style={{ padding: "9px 10px", textAlign: "right", fontWeight: 700, color: (r.diasTotais || 0) > 50 ? "var(--gaq-red)" : "var(--gaq-text)" }}>{r.diasTotais || 0}</td>
+                                </tr>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ════════════ ABA: ALERTAS ════════════ */}
         {aba === "alertas" && <div className="anim-fade">
@@ -8403,6 +9600,283 @@ GAQ — Gerência de Aquisições`;
           </div>
         </div>}
 
+        {/* ════════════ ABA: RELATÓRIO CUSTOMIZADO (Admin Master) ════════════ */}
+        {aba === "relCustom" && isAdminMaster && (() => {
+          const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+          const diasN = parseInt(rcuDias, 10);
+          const temDias = !isNaN(diasN) && diasN > 0;
+          const stDefs = [
+            { id: "andamento", label: "Em andamento", test: r => r.emA, color: "#2e86c1" },
+            { id: "concluidos", label: "Concluídos", test: r => r.isConcluded, color: "#27ae60" },
+            { id: "cancelfrac", label: "Cancelados/Fracassados", test: r => r.isCanceled || r.isFailed, color: "#c0392b" },
+            { id: "suspensos", label: "Suspensos", test: r => r.isSuspended, color: "#e67e22" },
+          ];
+          // Id estável do processo (para exclusão manual)
+          const procId = (r) => r.ProcessKey || r.NumRC || r.TicketSD || "";
+          // Campos Suite Sesc (mesma busca tolerante do modal de timeline)
+          const suiteInfo = (r) => {
+            const fk = (id) => Object.keys(r).find(k => nrm(k).replace(/[\s_\-]/g, "") === id);
+            const kId = fk("identificadorsuitesesc"), kSt = fk("statussuitesesc"), kHab = fk("habilitadaemsuitesesc"), kResp = fk("responsabilidadesuitesesc");
+            const txt = (v) => (v == null ? "" : v.toString().trim());
+            const vId = txt(kId && r[kId]), vSt = txt(kSt && r[kSt]), vResp = txt(kResp && r[kResp]);
+            const dHab = kHab ? pd(r[kHab]) : null;
+            const vHab = dHab ? fmt(dHab) : txt(kHab && r[kHab]);
+            return (vId || vSt || vHab || vResp) ? { id: vId, st: vSt, hab: vHab, resp: vResp } : null;
+          };
+          const procs = baseEnriched
+            .filter(r => {
+              const pid = procId(r);
+              if (pid && rcuExcl.includes(pid)) return false;
+              if (rcuAreas.length && !rcuAreas.includes(r["Área Requisitante"])) return false;
+              if (rcuStatus.length && !rcuStatus.some(id => { const d = stDefs.find(s => s.id === id); return d && d.test(r); })) return false;
+              if (temDias) {
+                if (!r.aberturaRC) return false;
+                const d = du(r.aberturaRC, hoje);
+                if (rcuDiasModo === "ate" ? d > diasN : d <= diasN) return false;
+              }
+              return true;
+            })
+            .map(r => ({ ...r, _diasRC: r.aberturaRC ? du(r.aberturaRC, hoje) : null }))
+            .sort((a, b) => (b._diasRC ?? -1) - (a._diasRC ?? -1));
+
+          // ── Indicadores do resumo ──
+          const emAList = procs.filter(r => r.emA);
+          const conclList = procs.filter(r => r.isConcluded);
+          // SLA só é computado se algum indicador que depende dele estiver selecionado
+          const needSla = rcuInds.includes("slaok") || rcuInds.includes("criticos");
+          const slaList = needSla ? procs.map(r => calcSLAClassification(r, phaseIntervals)).filter(Boolean) : [];
+          const slaVenc = slaList.filter(s => s.bucket === "critico" || s.bucket === "sla_vencido").length;
+          const slaOkPct = slaList.length ? Math.round(((slaList.length - slaVenc) / slaList.length) * 100) : null;
+          const criticosN = slaList.filter(s => s.bucket === "critico").length;
+          const leads = conclList.map(r => r.LeadTime).filter(v => v > 0);
+          const leadMedio = leads.length ? Math.round(leads.reduce((a, b) => a + b, 0) / leads.length) : null;
+          const agings = emAList.filter(r => r.aberturaRC).map(r => du(r.aberturaRC, hoje));
+          const agingMedio = agings.length ? Math.round(agings.reduce((a, b) => a + b, 0) / agings.length) : null;
+          const IND_DEFS = [
+            { id: "total", label: "Processos", val: procs.length, color: "#1a5276" },
+            { id: "andamento", label: "Em andamento", val: emAList.length, color: "#2e86c1" },
+            { id: "concluidos", label: "Concluídos", val: conclList.length, color: "#27ae60" },
+            { id: "slaok", label: "SLA em dia", val: slaOkPct == null ? "—" : slaOkPct + "%", color: "#16a085" },
+            { id: "criticos", label: "Críticos", val: criticosN, color: "#c0392b" },
+            { id: "lead", label: "Lead médio (d.u.)", val: leadMedio ?? "—", color: "#8e44ad" },
+            { id: "aging", label: "Aging médio RC (d.u.)", val: agingMedio ?? "—", color: "#e67e22" },
+            { id: "parados", label: "Parados >15 d.u.", val: emAList.filter(r => r.diasParado > 15).length, color: "#d35400" },
+          ];
+          const kpisSel = IND_DEFS.filter(d => rcuInds.includes(d.id));
+
+          const toggle = (arr, set, v) => set(arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v]);
+          const Chip = ({ on, color = "#1a5276", onClick, children }) => (
+            <button type="button" onClick={onClick}
+              style={{ background: on ? color : "var(--gaq-surface)", color: on ? "#fff" : "var(--gaq-text-2)", border: `1px solid ${on ? color : "var(--gaq-line)"}`, borderRadius: 999, padding: "4px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", transition: "all .15s" }}>
+              {children}
+            </button>
+          );
+
+          const diasLabel = temDias
+            ? (rcuDiasModo === "ate" ? `RC aberta nos últimos ${diasN} d.u.` : `RC aberta há mais de ${diasN} d.u.`)
+            : "sem filtro de dias";
+
+          const exportarPDF = () => {
+            const payload = {
+              areasLabel: rcuAreas.length ? rcuAreas.join(" · ") : "Todas as áreas",
+              diasLabel,
+              statusLabel: rcuStatus.length ? rcuStatus.map(id => (stDefs.find(s => s.id === id) || {}).label).filter(Boolean).join(" + ") : "Todas as situações",
+              kpis: kpisSel.map(d => ({ label: d.label, value: d.val, color: d.color })),
+              procs: procs.slice(0, 400).map(r => ({
+                rc: r.NumRC || "", ticket: r.TicketSD || "", area: r["Área Requisitante"] || "",
+                mod: r.Modalidade || "", status: r.statusDet || r.status || "",
+                resp: r.respAtivo || r.respNCL || r.Pregoeiro || "",
+                objeto: (r.Objeto || "").slice(0, 220),
+                diasRC: r._diasRC,
+                processo: r.NumProcesso || "", pedidoSuite: r.NumPedidoSuite || "",
+                suite: suiteInfo(r),
+                entries: getOrderedTimelineEntries(r).filter(e => e.date).map((e, i, arr) => ({
+                  label: e.label, data: fmt(e.date), du: i > 0 ? duSigned(arr[i - 1].date, e.date) : null, isCPL: e.isCPL,
+                })),
+              })),
+              meta,
+            };
+            const html = gerarRelatorioCustom(payload);
+            const win = window.open("", "_blank");
+            win.document.write(html);
+            win.document.close();
+          };
+
+          const MAX_LIST = 300;
+          const lista = procs.slice(0, MAX_LIST);
+
+          return <div className="anim-fade">
+            {/* Header gradient */}
+            <div style={{ background: "linear-gradient(135deg, #0f2e2a 0%, #16a085 100%)", color: "#fff", borderRadius: "var(--gaq-r-xl, 16px)", padding: "24px 28px", marginBottom: 18, boxShadow: "var(--gaq-shadow-2)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, opacity: .72, letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 4 }}>Administração · Admin Master</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-.02em" }}>Relatório Customizado</div>
+                  <div style={{ fontSize: 12, opacity: .82, marginTop: 2 }}>Selecione áreas, janela de dias a contar da RC e indicadores — e gere o relatório com a linha de datas de cada processo.</div>
+                </div>
+                <button type="button" onClick={exportarPDF} disabled={procs.length === 0}
+                  style={{ background: "rgba(255,255,255,.16)", border: "1px solid rgba(255,255,255,.35)", color: "#fff", borderRadius: 10, padding: "9px 18px", fontSize: 12, fontWeight: 700, cursor: procs.length ? "pointer" : "not-allowed", opacity: procs.length ? 1 : .5, display: "flex", alignItems: "center", gap: 7 }}>
+                  <Icon name="doc" size={14}/> Gerar Relatório (PDF)
+                </button>
+              </div>
+            </div>
+
+            {/* ── Filtros ── */}
+            <div className="gaq-card" style={{ padding: 18, marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+                <div className="gaq-eyebrow">Áreas requisitantes {rcuAreas.length > 0 ? `(${rcuAreas.length} selecionada(s))` : "(todas)"}</div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button type="button" className="gaq-btn" style={{ fontSize: 10, padding: "3px 10px" }} onClick={() => setRcuAreas([...areas])}>Todas</button>
+                  <button type="button" className="gaq-btn" style={{ fontSize: 10, padding: "3px 10px" }} onClick={() => setRcuAreas([])}>Limpar</button>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
+                {areas.map(a => (
+                  <Chip key={a} on={rcuAreas.includes(a)} color="#16a085" onClick={() => toggle(rcuAreas, setRcuAreas, a)}>{a}</Chip>
+                ))}
+              </div>
+
+              <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
+                <div>
+                  <div className="gaq-eyebrow" style={{ marginBottom: 8 }}>Dias a contar da RC (d.u.)</div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <select value={rcuDiasModo} onChange={e => setRcuDiasModo(e.target.value)}
+                      style={{ background: "var(--gaq-surface)", color: "var(--gaq-text)", border: "1px solid var(--gaq-line)", borderRadius: 8, padding: "6px 10px", fontSize: 12 }}>
+                      <option value="ate">RC aberta nos últimos…</option>
+                      <option value="acima">RC aberta há mais de…</option>
+                    </select>
+                    <input type="number" min="1" placeholder="ex.: 90" value={rcuDias} onChange={e => setRcuDias(e.target.value)}
+                      style={{ width: 90, background: "var(--gaq-surface)", color: "var(--gaq-text)", border: "1px solid var(--gaq-line)", borderRadius: 8, padding: "6px 10px", fontSize: 12 }} />
+                    <span style={{ fontSize: 11, color: "var(--gaq-text-3)" }}>d.u.</span>
+                    {temDias && <button type="button" className="gaq-btn" style={{ fontSize: 10, padding: "3px 10px" }} onClick={() => setRcuDias("")}>×</button>}
+                  </div>
+                  <div style={{ fontSize: 10, color: "var(--gaq-text-3)", marginTop: 5 }}>{temDias ? diasLabel + " · processos sem RC ficam fora" : "Vazio = sem filtro de dias (inclui processos sem RC)"}</div>
+                </div>
+                <div>
+                  <div className="gaq-eyebrow" style={{ marginBottom: 8 }}>Situação</div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {stDefs.map(s => (
+                      <Chip key={s.id} on={rcuStatus.includes(s.id)} color={s.color} onClick={() => toggle(rcuStatus, setRcuStatus, s.id)}>{s.label}</Chip>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 10, color: "var(--gaq-text-3)", marginTop: 5 }}>Nenhuma selecionada = todas as situações</div>
+                </div>
+                <div>
+                  <div className="gaq-eyebrow" style={{ marginBottom: 8 }}>Indicadores do resumo</div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", maxWidth: 420 }}>
+                    {IND_DEFS.map(d => (
+                      <Chip key={d.id} on={rcuInds.includes(d.id)} color={d.color} onClick={() => toggle(rcuInds, setRcuInds, d.id)}>{d.label}</Chip>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Resumo dos indicadores ── */}
+            {kpisSel.length > 0 && (
+              <div className="gaq-kpi-grid" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(130px, 1fr))`, marginBottom: 14 }}>
+                {kpisSel.map(d => (
+                  <div key={d.id} className="gaq-kpi" style={{ borderTop: `3px solid ${d.color}` }}>
+                    <span className="lbl">{d.label}</span>
+                    <div className="val" style={{ color: d.color }}>{d.val}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* ── Lista de processos com linha de datas ── */}
+            <div className="gaq-card" style={{ padding: 18 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+                <div className="gaq-eyebrow">Processos ({procs.length}){procs.length > MAX_LIST ? ` · exibindo os ${MAX_LIST} mais antigos por RC` : ""}</div>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  {rcuExcl.length > 0 && (
+                    <button type="button" onClick={() => setRcuExcl([])} title="Devolve ao relatório todos os processos excluídos manualmente"
+                      style={{ background: "#c0392b18", border: "1px solid #c0392b55", color: "#c0392b", borderRadius: 999, padding: "3px 12px", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>
+                      {rcuExcl.length} excluído(s) manualmente · restaurar todos
+                    </button>
+                  )}
+                  <div style={{ fontSize: 10, color: "var(--gaq-text-3)" }}>{diasLabel} · clique num processo para abrir a timeline · × exclui do relatório</div>
+                </div>
+              </div>
+              {procs.length === 0 && (
+                <div style={{ padding: "26px 10px", textAlign: "center", color: "var(--gaq-text-3)", fontSize: 12 }}>Nenhum processo com os filtros atuais.</div>
+              )}
+              {lista.map((r, ri) => {
+                const entries = getOrderedTimelineEntries(r).filter(e => e.date);
+                const stChip = r.emA ? { c: "#2e86c1", t: "Em andamento" } : r.isConcluded ? { c: "#27ae60", t: "Concluído" } : (r.isCanceled || r.isFailed) ? { c: "#c0392b", t: r.status } : { c: "#e67e22", t: r.status || "—" };
+                const suite = suiteInfo(r);
+                return (
+                  <div key={(r.ProcessKey || "") + ri} onClick={() => setSelProc(r)}
+                    style={{ border: "1px solid var(--gaq-line)", borderRadius: 12, padding: "12px 14px", marginBottom: 10, cursor: "pointer", background: "var(--gaq-surface)" }}
+                    onMouseEnter={e => e.currentTarget.style.background = "var(--gaq-bg-2)"}
+                    onMouseLeave={e => e.currentTarget.style.background = "var(--gaq-surface)"}>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 6 }}>
+                      <span style={{ fontWeight: 700, fontSize: 13, color: "var(--gaq-blue)" }}>{r.NumRC || r.TicketSD || r.ProcessKey || "—"}</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, background: "#16a08522", color: "#16a085", borderRadius: 999, padding: "2px 9px" }}>{r["Área Requisitante"] || "—"}</span>
+                      <span style={{ fontSize: 10, color: "var(--gaq-text-3)" }}>{r.Modalidade || "—"}</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, background: stChip.c + "22", color: stChip.c, borderRadius: 999, padding: "2px 9px" }}>{stChip.t}</span>
+                      {r.statusDet && nrm(r.statusDet) !== nrm(stChip.t) && (
+                        <span style={{ fontSize: 10, fontWeight: 800, background: stChip.c, color: "#fff", borderRadius: 999, padding: "2px 11px", letterSpacing: ".02em", textTransform: "uppercase" }}>{r.statusDet}</span>
+                      )}
+                      <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+                        {r._diasRC != null && <span style={{ fontSize: 10, fontWeight: 700, color: r._diasRC > 90 ? "#c0392b" : r._diasRC > 50 ? "#e67e22" : "var(--gaq-text-3)" }}>{r._diasRC} d.u. desde a RC</span>}
+                        <button type="button" title="Excluir este processo do relatório"
+                          onClick={(e) => { e.stopPropagation(); setRcuExcl(prev => [...prev, procId(r)]); }}
+                          style={{ background: "none", border: "1px solid var(--gaq-line)", color: "var(--gaq-text-3)", borderRadius: 6, width: 22, height: 22, fontSize: 12, lineHeight: 1, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                          onMouseEnter={e => { e.currentTarget.style.background = "#c0392b"; e.currentTarget.style.color = "#fff"; e.currentTarget.style.borderColor = "#c0392b"; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--gaq-text-3)"; e.currentTarget.style.borderColor = "var(--gaq-line)"; }}>×</button>
+                      </span>
+                    </div>
+                    {/* Códigos do processo (copiáveis) */}
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+                      {r.NumRC && <CopyChip label="RC" value={r.NumRC} color="#2e86c1" solid />}
+                      {r.TicketSD && <CopyChip label="Pré-compra" value={r.TicketSD} color="#27ae60" solid />}
+                      {r.NumProcesso && <CopyChip label="Nº Processo" value={r.NumProcesso} color="#8e44ad" solid />}
+                      {r.NumPedidoSuite && <CopyChip label="Pedido Suite" value={r.NumPedidoSuite} color="#d35400" solid />}
+                    </div>
+                    {/* Suite Sesc (quando houver informação) */}
+                    {suite && (
+                      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", background: "#16a08511", border: "1px solid #16a08533", borderRadius: 8, padding: "4px 10px", marginBottom: 8, fontSize: 10.5, color: "var(--gaq-text-2)" }}>
+                        <b style={{ color: "#16a085", fontSize: 9, textTransform: "uppercase", letterSpacing: ".04em" }}>Suite Sesc</b>
+                        {suite.id && <CopyChip label="Identificador" value={suite.id} color="#16a085" solid />}
+                        {suite.st && <span>Status: <b style={{ color: "var(--gaq-text)" }}>{suite.st}</b></span>}
+                        {suite.hab && <span>Habilitada em: <b style={{ color: "var(--gaq-text)" }}>{suite.hab}</b></span>}
+                        {suite.resp && <span>Resp.: <b style={{ color: "var(--gaq-text)" }}>{suite.resp}</b></span>}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 11, color: "var(--gaq-text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 8 }}>
+                      {(r.respAtivo || r.respNCL || r.Pregoeiro) ? <b>{r.respAtivo || r.respNCL || r.Pregoeiro} · </b> : null}{(r.Objeto || "").slice(0, 160) || "—"}
+                    </div>
+                    {/* Linha de datas do processo */}
+                    {entries.length === 0
+                      ? <div style={{ fontSize: 10, color: "var(--gaq-text-3)", fontStyle: "italic" }}>Sem datas registradas.</div>
+                      : <div style={{ display: "flex", alignItems: "stretch", gap: 0, flexWrap: "wrap", rowGap: 10 }}>
+                          {entries.map((e, i) => {
+                            const gap = i > 0 ? duSigned(entries[i - 1].date, e.date) : null;
+                            const cor = e.isCPL ? "#8e44ad" : "#2e86c1";
+                            return (
+                              <React.Fragment key={e.key + "_" + i}>
+                                {i > 0 && (
+                                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "0 6px", minWidth: 34 }}>
+                                    <span style={{ fontSize: 9, fontWeight: 700, color: gap > 15 ? "#e67e22" : "var(--gaq-text-3)" }}>+{gap} d.u.</span>
+                                    <span style={{ color: "var(--gaq-line)", fontSize: 11, lineHeight: 1 }}>─▶</span>
+                                  </div>
+                                )}
+                                <div style={{ background: "var(--gaq-bg-2)", border: `1px solid ${cor}33`, borderTop: `2px solid ${cor}`, borderRadius: 8, padding: "5px 10px", minWidth: 86 }}>
+                                  <div style={{ fontSize: 8, fontWeight: 700, color: cor, textTransform: "uppercase", letterSpacing: ".03em", whiteSpace: "nowrap" }}>{e.label}</div>
+                                  <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--gaq-text)", fontVariantNumeric: "tabular-nums" }}>{fmt(e.date)}</div>
+                                </div>
+                              </React.Fragment>
+                            );
+                          })}
+                        </div>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>;
+        })()}
+
         {/* ════════════ ABA: IA INSIGHTS (Admin Master + Diretoria) ════════════ */}
         {aba === "iaInsights" && (isAdminMaster || isDiretor) && <div>
           {/* Header gradient (roxo/índigo — tema IA) */}
@@ -8671,7 +10145,7 @@ GAQ — Gerência de Aquisições`;
                           </div>
                           {r.statusDet && <div style={{ display: "inline-block", fontSize: 10, color: "#7c3aed", background: "#f5f3ff", borderRadius: 5, padding: "1px 7px", marginBottom: 4 }}>{r.statusDet}</div>}
                           <div style={{ fontSize: 12, color: "var(--text)", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(r.Objeto || "").slice(0, 100) || "—"}</div>
-                          <ServiceDeskAlertStrip summary={sdAlert} />
+                          <ServiceDeskAlertStrip summary={sdAlert} showLastInteraction={!isServiceDeskConcluido(r)} />
                           <div style={{ display: "flex", gap: 5, flexWrap: "wrap", fontSize: 10, color: "var(--text3)" }}>
                             {r["Área Requisitante"] && <span>Área: <b style={{ color: "var(--text2)" }}>{r["Área Requisitante"]}</b></span>}
                             {r.aberturaSD && <span>· Abertura pré-compra: <b style={{ color: "var(--text2)" }}>{r.aberturaSD.toLocaleDateString("pt-BR")}</b></span>}
@@ -9976,6 +11450,158 @@ GAQ — Gerência de Aquisições`;
                     </div>
                   )}
 
+                  {/* ── CRONOGRAMA ANUAL INTELIGENTE (NLP + clustering) ── */}
+                  {(() => {
+                    const MESES_FULL = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+                    const recur = detectRecurrentes(base, { anos: [anoAtual - 2, anoBase, anoAtual] });
+                    if (recur.recurrentes.length === 0) {
+                      return (
+                        <div style={{ padding: "36px 48px", borderBottom: `1px solid ${PL.line}` }}>
+                          <div style={{ marginBottom: 12 }}>
+                            <div style={{ fontSize: 10, color: PL.ink3, textTransform: "uppercase", letterSpacing: 3, fontWeight: 600, marginBottom: 4 }}>Pattern Detection · NLP</div>
+                            <div style={{ fontSize: 24, fontWeight: 800, color: PL.ink, letterSpacing: -1 }}>Cronograma Anual Inteligente</div>
+                          </div>
+                          <div style={{ background: "#fff", padding: 24, borderRadius: 18, border: `1px dashed ${PL.line}`, color: PL.ink3, fontSize: 12 }}>
+                            Ainda não há sinal suficiente para detectar demandas recorrentes — é preciso pelo menos 2 anos de dados com objetos descritos.
+                          </div>
+                        </div>
+                      );
+                    }
+                    const maxEv = Math.max(...recur.calendario.map(c => c.eventos.length), 1);
+                    const totalEventosAno = recur.recurrentes.length;
+                    const eventosNoCalendario = recur.calendario.reduce((s, c) => s + c.eventos.length, 0);
+                    const anosLabel = recur.meta.anosCobertos.join(", ");
+                    return (
+                      <div style={{ padding: "36px 48px", background: PL.bg2, borderBottom: `1px solid ${PL.line}` }}>
+                        {/* Header */}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16, marginBottom: 24 }}>
+                          <div>
+                            <div style={{ fontSize: 10, color: PL.ink3, textTransform: "uppercase", letterSpacing: 3, fontWeight: 600, marginBottom: 4 }}>Pattern Detection · NLP + Clustering</div>
+                            <div style={{ fontSize: 24, fontWeight: 800, color: PL.ink, letterSpacing: -1 }}>Cronograma Anual Inteligente</div>
+                            <div style={{ fontSize: 12, color: PL.ink3, marginTop: 4, maxWidth: 640 }}>
+                              <strong>{totalEventosAno}</strong> demanda(s) recorrente(s) detectada(s) em <strong>{recur.meta.totalProcs}</strong> processo(s) de {anosLabel}. Clique em um mês para ver as demandas previstas e a sugestão de quando abrir a pré-compra.
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", gap: 8, fontSize: 10, color: PL.ink3 }}>
+                            <span style={{ background: PL.bg, padding: "8px 12px", borderRadius: 12, border: `1px solid ${PL.line}` }}>{eventosNoCalendario} demandas com mês previsto</span>
+                            <span style={{ background: PL.bg, padding: "8px 12px", borderRadius: 12, border: `1px solid ${PL.line}` }}>{totalEventosAno - eventosNoCalendario} sem data clara</span>
+                          </div>
+                        </div>
+
+                        {/* Linha do tempo anual */}
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 6, marginBottom: 18 }}>
+                          {recur.calendario.map(({ mes, eventos }) => {
+                            const ativo = recMesAberto === mes;
+                            const intensity = eventos.length / maxEv;
+                            const isEmpty = eventos.length === 0;
+                            const bg = isEmpty
+                              ? PL.bg
+                              : ativo
+                                ? PL.ink
+                                : `rgba(10, 132, 255, ${(0.08 + intensity * 0.30).toFixed(3)})`;
+                            const color = ativo ? "#fff" : (isEmpty ? PL.ink3 : PL.ink);
+                            return (
+                              <div key={mes}
+                                onClick={() => !isEmpty && setRecMesAberto(ativo ? null : mes)}
+                                style={{ background: bg, color, borderRadius: 12, padding: "12px 8px", textAlign: "center", cursor: isEmpty ? "default" : "pointer", border: `1px solid ${ativo ? PL.ink : PL.line}`, transition: "all .15s" }}>
+                                <div style={{ fontSize: 9, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, opacity: .8 }}>{MESES[mes]}</div>
+                                <div style={{ fontSize: 22, fontWeight: 900, marginTop: 4, letterSpacing: -1, fontVariantNumeric: "tabular-nums" }}>{eventos.length}</div>
+                                <div style={{ fontSize: 8, marginTop: 2, opacity: .7 }}>{eventos.length === 1 ? "demanda" : "demandas"}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Painel do mês selecionado */}
+                        {recMesAberto !== null && recur.calendario[recMesAberto].eventos.length > 0 && (
+                          <div style={{ background: "#fff", borderRadius: 24, padding: "20px 24px", border: `1px solid ${PL.line}`, marginBottom: 8 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+                              <div style={{ fontSize: 12, color: PL.ink, textTransform: "uppercase", letterSpacing: 2, fontWeight: 700 }}>
+                                {MESES_FULL[recMesAberto]} · {recur.calendario[recMesAberto].eventos.length} demanda(s) prevista(s)
+                              </div>
+                              <button onClick={() => setRecMesAberto(null)} style={{ background: "transparent", border: "none", color: PL.ink3, fontSize: 11, cursor: "pointer" }}>fechar ×</button>
+                            </div>
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 12 }}>
+                              {recur.calendario[recMesAberto].eventos.map((ev, i) => {
+                                const confColor = ev.confidence >= 75 ? PL.green : ev.confidence >= 50 ? PL.amber : PL.red;
+                                const confBg = ev.confidence >= 75 ? PL.greenL : ev.confidence >= 50 ? PL.amberL : PL.redL;
+                                const anosOrd = Object.entries(ev.anos).sort((a, b) => +a[0] - +b[0]);
+                                return (
+                                  <div key={i} style={{ background: PL.bg, padding: "16px 18px", borderRadius: 18, border: `1px solid ${PL.line}`, display: "flex", flexDirection: "column", gap: 9 }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                                      <div style={{ fontSize: 13, fontWeight: 800, color: PL.ink, lineHeight: 1.25 }}>{ev.label}</div>
+                                      <div style={{ background: confBg, color: confColor, fontSize: 9, fontWeight: 800, padding: "3px 8px", borderRadius: 999, letterSpacing: .5, textTransform: "uppercase", flexShrink: 0 }}>
+                                        {ev.confidence}%
+                                      </div>
+                                    </div>
+                                    <div style={{ fontSize: 10, color: PL.ink3, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                                      {anosOrd.map(([a, c]) => (
+                                        <span key={a}><strong style={{ color: PL.ink2 }}>{a}:</strong> {c} proc</span>
+                                      ))}
+                                      <span>· lead {ev.avgLead || "—"} d.u.</span>
+                                    </div>
+                                    {ev.topAreas.length > 0 && (
+                                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                                        {ev.topAreas.map(([a, c]) => (
+                                          <span key={a} style={{ background: "#fff", border: `1px solid ${PL.line}`, fontSize: 9, padding: "2px 7px", borderRadius: 999, color: PL.ink2 }}>{a} <strong style={{ color: PL.ink }}>{c}</strong></span>
+                                        ))}
+                                      </div>
+                                    )}
+                                    {ev.mesSDSugerido !== null && (
+                                      <div style={{ background: PL.accentL, padding: "8px 10px", borderRadius: 10, fontSize: 10, color: PL.ink, lineHeight: 1.4 }}>
+                                        <strong>Sugestão:</strong> abrir pré-compra em <strong style={{ color: PL.accent }}>{MESES_FULL[ev.mesSDSugerido]}</strong>
+                                        {ev.aindaEsteAno != null && (
+                                          <div style={{ marginTop: 3, color: PL.amber, fontSize: 9, fontWeight: 700 }}>
+                                            ⚠ {ev.aindaEsteAno} ainda sem demanda registrada
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                    <div style={{ fontSize: 9, color: PL.ink3, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }} title={ev.objetoExemplo}>
+                                      "{(ev.objetoExemplo || "").slice(0, 140)}{(ev.objetoExemplo || "").length > 140 ? "…" : ""}"
+                                    </div>
+                                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", borderTop: `1px solid ${PL.line}`, paddingTop: 8 }}>
+                                      {ev.keywords.slice(0, 3).map((k, j) => (
+                                        <span key={j} style={{ fontFamily: PL.mono, fontSize: 8, color: PL.ink3, background: "#fff", padding: "1px 6px", borderRadius: 4, border: `1px solid ${PL.line}` }}>{k}</span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Top recorrências (sem agrupar por mês) */}
+                        <div style={{ marginTop: 8 }}>
+                          <div style={{ fontSize: 10, color: PL.ink3, textTransform: "uppercase", letterSpacing: 2, fontWeight: 700, marginBottom: 10 }}>
+                            Top demandas por confiança
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 8 }}>
+                            {recur.recurrentes.slice(0, 8).map((ev, i) => {
+                              const confColor = ev.confidence >= 75 ? PL.green : ev.confidence >= 50 ? PL.amber : PL.red;
+                              return (
+                                <div key={i}
+                                  onClick={() => ev.mesPrevisto != null && setRecMesAberto(ev.mesPrevisto)}
+                                  style={{ background: "#fff", padding: "10px 12px", borderRadius: 14, border: `1px solid ${PL.line}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, cursor: ev.mesPrevisto != null ? "pointer" : "default", transition: "background .15s" }}
+                                  onMouseEnter={e => e.currentTarget.style.background = PL.bg}
+                                  onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: 11, fontWeight: 700, color: PL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ev.label}</div>
+                                    <div style={{ fontSize: 9, color: PL.ink3, marginTop: 2 }}>
+                                      {ev.total} proc · {ev.yearsSet.join("/")} {ev.mesPrevisto != null ? `· pico ${MESES[ev.mesPrevisto]}` : ""}
+                                    </div>
+                                  </div>
+                                  <div style={{ fontSize: 11, fontWeight: 800, color: confColor, fontFamily: PL.mono }}>{ev.confidence}%</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {/* ── RODAPÉ ── */}
                   <div style={{ padding: "20px 48px", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
                     <div style={{ fontSize: 10, color: PL.ink3, letterSpacing: .5 }}>
@@ -9997,6 +11623,7 @@ GAQ — Gerência de Aquisições`;
       {tagModal && <TagModal proc={tagModal} onClose={() => setTagModal(null)} onUpdate={refreshTags} />}
       {pantanalSel && <PantanalModal proc={pantanalSel} onClose={() => setPantanalSel(null)} />}
       {showEmailDiario && <EmailDiarioModal alertSDAberto={alertSDAberto} fBase={fBase} serviceDeskData={serviceDeskData} onClose={() => setShowEmailDiario(false)} />}
+      {showGaqSextaEditor && <GaqSextaEditorModal processos={fBase} area={fArea || "Todas as Áreas"} meta={meta} fBase={fBase} onClose={() => setShowGaqSextaEditor(false)} />}
 
       {/* Floating controls for Presentation Mode */}
       {presMode && (

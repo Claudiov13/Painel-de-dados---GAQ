@@ -275,34 +275,257 @@ function parseBase(rows) {
   });
 }
 
-function calcularScore(comp, hist, backlog, dem, pool) {
-  const h = hist.filter(r => pool === "cpl" ? (r.Pregoeiro === comp || r.cplResp === comp) : r.respNCL === comp);
-  const tot = h.length || 1;
+/* Status efetivo do Service Desk de pré-compra, aproveitando o log do ticket.
+   Só sobrescreve o default "EM ANÁLISE SERVICE DESK" (que costuma ficar
+   desatualizado quando ninguém atualiza a data): se há data de encerramento do
+   SD (encSD — vinda do log do ticket ou do JSON), o status efetivo passa a
+   "SERVICE DESK CONCLUÍDO". Qualquer outro status do JSON é mantido como veio
+   (ex.: cancelado), pois ele reflete uma decisão posterior. */
+function statusEfetivoSD(proc) {
+  const js = (proc && (proc.statusDet || proc.status) || "Sem status").toString().trim();
+  if (nrm(js) === "em analise service desk" && proc && proc.encSD) return "SERVICE DESK CONCLUÍDO";
+  return js || "Sem status";
+}
+
+/* Processo em pré-compra com SD concluído e ainda SEM RC aberta. Enquanto a RC
+   não é aberta pela área não há esforço do comprador, então NÃO deve contar na
+   carteira dele — nem no balanceamento de nova demanda, nem no ranking
+   executivo. Só volta a contar quando sair desse status (ex.: ao abrir a RC). */
+function isSDConcluidoSemRC(proc) {
+  if (!proc) return false;
+  if (String(proc.NumRC || "").trim()) return false; // já tem RC → volta p/ a conta
+  return nrm(statusEfetivoSD(proc)).includes("service desk concluido");
+}
+
+/* Recomendacao de comprador para uma nova demanda
+   Sub-scores (referencia, total tipico ~100):
+   - sA Expertise (20): afinidade com area, modalidade e objeto (retorno marginal curto).
+   - sB Performance (8): lead-time historico; peso menor que volume/carteira.
+   - sC Carteira atual (ate 24, SEM PISO em nenhum termo): carga ponderada,
+        SDs abertos e criticos. Nenhum componente trava em zero: quem ja esta
+        muito carregado segue perdendo pontos (pode ficar bem negativo). Sem
+        isso, 6 SDs abertos e 18 SDs abertos pontuavam igual (saturacao).
+   - sD Complexidade (4): fit da modalidade/objeto, zerado se modalidade for ignorada.
+   - sE Distrib. justa (18): throughput, carga na area, SD em analise (sem piso)
+        e carga total.
+   - sF Volume SD (6): historico de absorcao de pre-compra.
+   - sG Ano atual (14): participacao no ano (6, satura em 12 tocados) +
+        equilibrio vs media do pool (8) — quem ja tocou mais que a media do
+        time no ano perde pontos; quem tocou menos ganha.
+   rankScore (ordenacao) usa o total bruto (pode ser negativo p/ sobrecarregados);
+   `total` exibido e limitado a [0,100].
+
+   opts:
+     ignorarModalidade: quando true ou dem.modalidade vazia, redistribui peso
+                        de modalidade para area/objeto e zera sD.
+     anoAtual: sobrescreve o ano de referencia; default = ano corrente.
+     mediaTocadosPool: media de processos tocados no ano entre os candidatos do
+                       pool (calculada em gerarRecs via passada previa); usada
+                       no componente de equilibrio do sG. Ausente => ratio 1.
+*/
+function calcularScore(comp, hist, backlog, dem, pool, opts) {
+  const isPool = pool === "cpl";
+  const ignMod = !!(opts && opts.ignorarModalidade) || !dem.modalidade;
+  const anoAtual = (opts && opts.anoAtual) || new Date().getFullYear();
+
+  const histBase = hist || [];
+  const histProdutivo = histBase.filter(r => !r.isCanceled && !r.isFailed);
+
+  // Filtro histórico — pessoa atuou como Comprador/Avaliador (NCL) ou Pregoeiro/cplResp (CPL)
+  const matchHist = isPool
+    ? r => r.Pregoeiro === comp || r.cplResp === comp
+    : r => r.Comprador === comp || r.Avaliador === comp;
+
+  // Filtro backlog ativo na subárea relevante (para sC carga geral)
+  const matchActiveSubarea = isPool
+    ? r => (r.Pregoeiro === comp || r.cplResp === comp) && r.faseSubarea === "CPL"
+    : r => (r.Comprador === comp || r.Avaliador === comp) && r.faseSubarea === "NCL";
+
+  // Mesmo criterio dos rankings executivos: conta quem esta como responsavel
+  // principal da linha, sem somar avaliador quando ja existe comprador.
+  const matchPrimaryActiveSubarea = isPool
+    ? r => (r.Pregoeiro || r.cplResp) === comp && r.faseSubarea === "CPL"
+    : r => (r.Comprador || r.Avaliador) === comp && r.faseSubarea === "NCL";
+
+  // Peso por papel — Comprador 1.0, Avaliador 0.5 quando há Comprador definido,
+  // Avaliador 1.0 quando é único responsável. CPL: papel único = 1.0.
+  const weightInProc = (r) => {
+    if (isPool) return matchHist(r) ? 1.0 : 0;
+    if (r.Comprador === comp) return 1.0;
+    if (r.Avaliador === comp) return (r.Comprador && r.Comprador !== comp) ? 0.5 : 1.0;
+    return 0;
+  };
+
+  const hAll = histBase.filter(matchHist);
+  const h = histProdutivo.filter(matchHist);
+
+  // sA Expertise (24) - sqrt sobre contagem absoluta
+  // Evita o efeito "1 processo na área = 100% match"; quem tem mais peso de
+  // histórico real ganha pontos de forma proporcional, com retorno marginal
+  // decrescente (9 processos ≈ pontuação máxima do componente).
   const simArea = h.filter(r => r["Área Requisitante"] === dem.area).length;
-  const simMod = h.filter(r => nrm(r.Modalidade || "") === nrm(dem.modalidade || "")).length;
-  const simObj = h.filter(r => matchObj(r.Objeto, dem.objeto)).length;
-  const sA = Math.min(35, Math.min(15, (simArea/tot)*45) + Math.min(10, (simMod/tot)*30) + Math.min(10, (simObj/tot)*30));
+  const simMod  = ignMod ? 0 : h.filter(r => nrm(r.Modalidade || "") === nrm(dem.modalidade || "")).length;
+  const simObj  = h.filter(r => matchObj(r.Objeto, dem.objeto)).length;
+  // Cap reduzido (24 -> 20) e retorno marginal mais curto: muito histórico na
+  // área para de inflar a nota cedo, reduzindo o domínio de quem só tem volume
+  // bruto. Quem tocou pouco-mas-relevante continua pontuando bem.
+  let sA;
+  if (ignMod) {
+    // sem modalidade: area (ate 11) + objeto (ate 9), total 20
+    sA = Math.min(20,
+      Math.min(11, Math.sqrt(simArea) * 4) +
+      Math.min(9,  Math.sqrt(simObj)  * 3.6)
+    );
+  } else {
+    sA = Math.min(20,
+      Math.min(8, Math.sqrt(simArea) * 3.4) +
+      Math.min(5, Math.sqrt(simMod)  * 2.2) +
+      Math.min(7, Math.sqrt(simObj)  * 3.2)
+    );
+  }
+
+  // sB Performance (8)
   const t = h.filter(r => r.LeadTime > 0).map(r => r.LeadTime);
   const med = t.length ? t.reduce((a,b) => a+b, 0) / t.length : 999;
-  const vr = t.length > 1 ? t.reduce((a,b) => a + (b-med)**2, 0) / t.length : 999;
-  const sB = (t.length ? Math.max(0, 20 - med/10) : 5) + (t.length > 1 ? Math.max(0, 10 - Math.sqrt(vr)/5) : 3);
-  const bk = backlog.filter(r => pool === "cpl"
-    ? (r.Pregoeiro === comp || r.cplResp === comp) && r.faseSubarea === "CPL"
-    : r.respNCL === comp && r.faseSubarea === "NCL");
-  const carga = bk.length;
-  const crit = bk.filter(r => pool === "cpl" ? r.criticoCpl : r.criticoNcl).length;
-  const sC = Math.max(0, 15 - carga*1.5) + Math.max(0, 10 - crit*2);
-  const modN = nrm(dem.modalidade || "");
-  const ehLic = ["pregao","concorrencia","dialogo competitivo"].some(m => modN.includes(m));
-  const hMod = hist.filter(r => nrm(r.Modalidade || "") === modN);
-  const taxaCF = hMod.length > 4 ? hMod.filter(r => r.isCanceled || r.isFailed).length / hMod.length : 0;
-  const hCM = h.filter(r => nrm(r.Modalidade || "") === modN);
-  let sD = ehLic ? (simMod > 0 ? 6 : 2) : 3;
-  if (taxaCF > 0.25) sD += hCM.some(r => r.isCanceled || r.isFailed) ? 3 : -1;
-  if (simObj > 0) sD += 2;
+  const vr  = t.length > 1 ? t.reduce((a,b) => a + (b-med)**2, 0) / t.length : 999;
+  const sB  = (t.length ? Math.max(0, 5 - med/30) : 1.5) + (t.length > 1 ? Math.max(0, 3 - Math.sqrt(vr)/16) : 1);
+
+  // Backlog que efetivamente pesa na carteira: exclui pré-compra com SD concluído
+  // e ainda sem RC (aguardando a área abrir a RC) — sem esforço do comprador, não
+  // conta como carga. Volta a contar assim que sair desse status.
+  const backlogAtivo = backlog.filter(r => !isSDConcluidoSemRC(r));
+
+  // sC Carteira atual (24)
+  const bk = backlogAtivo.filter(matchActiveSubarea);
+  const bkPrincipal = backlogAtivo.filter(matchPrimaryActiveSubarea);
+  const carga = bkPrincipal.length;
+  const cargaRaw = bk.length;
+  const tempAtual = bkPrincipal.filter(r => r._tempDemand).length;
+  const crit  = bkPrincipal.filter(r => isPool ? r.criticoCpl : r.criticoNcl).length;
+  const cargaPond = bk.reduce((s, r) => s + weightInProc(r), 0);
+  let sdAtual = 0;
+  backlogAtivo
+    .filter(r => r.aberturaSD && !r.encSD && matchPrimaryActiveSubarea(r))
+    .forEach(() => { sdAtual += 1; });
+  // Todos os termos de carga SEM piso: continuam subtraindo mesmo para quem já
+  // está muito carregado (podem ficar negativos). Com piso (Math.max(0,...)),
+  // o termo saturava cedo — ex.: 6 SDs abertos e 18 SDs abertos pontuavam
+  // IGUAL — e o motor ficava cego à diferença de carga justamente no regime de
+  // sobrecarga. Sem piso, carga real, SDs abertos, críticos e demandas
+  // temporárias sempre mexem na nota, e quem tem MENOS carga agora sobe.
+  const sC_carga = 14 - cargaPond * 0.9;
+  const sC_sd    = 6 - sdAtual * 0.8;
+  const sC_crit  = 4 - crit * 1.0;
+  const sC = sC_carga + sC_sd + sC_crit;
+
+  // sD Complexidade (4) - zerado quando modalidade e ignorada
+  let sD = 0;
+  let taxaCF = 0;
+  if (!ignMod) {
+    const modN = nrm(dem.modalidade || "");
+    const ehLic = ["pregao","concorrencia","dialogo competitivo"].some(m => modN.includes(m));
+    let raw = ehLic ? (simMod > 0 ? 2.2 : 0.8) : 1.2;
+    if (simObj > 0) raw += 0.8;
+    sD = Math.max(0, Math.min(4, raw));
+  }
+
+  // sF Volume SD (6) - SDs no historico produtivo (cap reduzido p/ não premiar
+  // volume bruto em excesso).
+  const totSD = h.filter(r => r.aberturaSD).length;
+  const sF = Math.min(6, (totSD / 28) * 6);
+
+  // sG Ano atual (14) = participacao (6) + equilibrio anual (8).
+  // Antes, sG premiava volume bruto do ano (tocados+concluidos), entao quem ja
+  // tinha absorvido MAIS demanda ganhava nota maior e recebia ainda mais — o
+  // oposto de distribuicao justa. Agora:
+  //   - participacao (6): distingue quem esta ativo de quem nao produz; satura
+  //     rapido (12 tocados = maximo), sem premiar excesso de volume.
+  //   - equilibrio (8): compara tocados no ano com a MEDIA do pool
+  //     (opts.mediaTocadosPool, calculada em gerarRecs). Abaixo da media ganha
+  //     mais (ratio 0.5 => 8); na media, 4; 1.5x a media ou mais => 0.
+  //     Conclusao/vazao continua premiada no sE_throughput.
+  const isInicioAnoAtual = (r) => {
+    const ini = r.aberturaRC || r.aberturaSD;
+    return !!(ini && ini.getFullYear() === anoAtual);
+  };
+  const tocadosAno = hAll.filter(isInicioAnoAtual).reduce((s, r) => s + weightInProc(r), 0);
+  const conclAno = h.filter(r => r.isConcluded && isInicioAnoAtual(r)).reduce((s, r) => s + weightInProc(r), 0);
+  const mediaTocadosPool = (opts && opts.mediaTocadosPool) || 0;
+  const ratioAno = mediaTocadosPool > 0 ? tocadosAno / mediaTocadosPool : 1;
+  const sG_particip = Math.min(6, (tocadosAno / 12) * 6);
+  const sG_equil = Math.max(0, Math.min(8, 8 * (1.5 - ratioAno)));
+  const sG = sG_particip + sG_equil;
+
+  // sE Distribuicao Justa (18)
+  // Premia THROUGHPUT (vazão) ao invés de só carga baixa em absoluto — assim
+  // alguém com carga zero mas que não produz não ganha pontos automáticos,
+  // e alguém que recebe muito mas também CONCLUI não perde por estar carregado.
+  // (a) Throughput do ano atual (5 pts): concluidos / tocados. >=0.7 = excelente.
+  const receb2026 = tocadosAno;
+  const concl2026 = conclAno;
+  const throughput = tocadosAno > 0 ? conclAno / tocadosAno : 0;
+  const sE_throughput = Math.min(5, throughput * (5 / 0.7));
+  // (b) Carga na area da nova demanda (5 pts) - usa carga ponderada.
+  let cargaArea = 0;
+  if (dem.area) {
+    backlogAtivo.filter(r => r.faseSubarea === (isPool ? "CPL" : "NCL"))
+      .filter(r => r["Área Requisitante"] === dem.area)
+      .forEach(r => { cargaArea += weightInProc(r); });
+  }
+  // (c) Carga em "Em analise Service Desk" (4 pts).
+  let cargaAnaliseSD = 0;
+  backlogAtivo
+    .filter(r => nrm(r.statusDet || "").includes("analise service desk"))
+    .forEach(r => { cargaAnaliseSD += weightInProc(r); });
+  // (d) Carga total NCL/CPL (4 pts), no mesmo criterio do painel executivo.
+  let cargaTotalPond = 0;
+  let cargaTotalPrincipal = 0;
+  backlogAtivo.filter(r => r.faseSubarea === (isPool ? "CPL" : "NCL"))
+    .forEach(r => {
+      cargaTotalPond += weightInProc(r);
+      if (matchPrimaryActiveSubarea(r)) cargaTotalPrincipal += 1;
+    });
+
+  // sE_analise SEM piso: e o termo que enxerga o backlog de pre-compra. Com
+  // piso, saturava em 5 SDs em analise (6 ou 18 pontuavam igual). Inclinacao
+  // reduzida (0.8 -> 0.5) porque esse backlog ja pesa tambem em sC_carga e
+  // sC_sd — sem piso, o custo marginal por SD extra ja e alto o suficiente.
+  const sE_area    = Math.max(0, 5 - cargaArea       * 1.0);
+  const sE_analise = 4 - cargaAnaliseSD * 0.5;
+  const sE_total   = Math.max(0, 4 - cargaTotalPrincipal * 0.4);
+  const sE = sE_throughput + sE_area + sE_analise + sE_total;
+
+  // rawTotal pode ser negativo (sobrecarga): usado em rankScore para ordenar.
+  // `total` exibido é limitado a [0,100].
+  const rawTotal = sA + sB + sC + sD + sE + sF + sG;
   return {
-    total: Math.min(100, Math.round(sA+sB+sC+sD)), sA: Math.round(sA), sB: Math.round(sB), sC: Math.round(sC), sD,
-    med: med === 999 ? null : Math.round(med), carga, crit, simArea, simMod, simObj, taxaCF: Math.round(taxaCF*100),
+    total: Math.max(0, Math.min(100, Math.round(rawTotal))),
+    rankScore: Math.round(rawTotal * 10) / 10,
+    sA: Math.round(sA), sB: Math.round(sB), sC: Math.round(sC),
+    sD: Math.round(sD), sE: Math.round(sE),
+    sF: Math.round(sF), sG: Math.round(sG),
+    sE_throughput: Math.round(sE_throughput * 10) / 10,
+    sE_area: Math.round(sE_area * 10) / 10,
+    sE_analise: Math.round(sE_analise * 10) / 10,
+    sE_total: Math.round(sE_total * 10) / 10,
+    med: med === 999 ? null : Math.round(med),
+    carga, cargaRaw, tempAtual, crit, simArea, simMod, simObj, taxaCF: Math.round(taxaCF * 100),
+    cargaPond: Math.round(cargaPond * 10) / 10,
+    sdAtual: Math.round(sdAtual * 10) / 10,
+    cargaArea: Math.round(cargaArea * 10) / 10,
+    cargaAnaliseSD: Math.round(cargaAnaliseSD * 10) / 10,
+    cargaTotalSub: cargaTotalPrincipal,
+    cargaTotalSubPond: Math.round(cargaTotalPond * 10) / 10,
+    totSD, concl2026, receb2026,
+    tocadosAno: Math.round(tocadosAno * 10) / 10,
+    conclAno: Math.round(conclAno * 10) / 10,
+    mediaTocadosPool: Math.round(mediaTocadosPool * 10) / 10,
+    ratioAno: Math.round(ratioAno * 100) / 100,
+    sG_particip: Math.round(sG_particip * 10) / 10,
+    sG_equil: Math.round(sG_equil * 10) / 10,
+    anoAtual,
+    throughput: Math.round(throughput * 100), // %
+    ignMod,
   };
 }
 
@@ -429,65 +652,50 @@ function calcMapInsights(base) {
    SEÇÃO 3 — GERENCIADOR DE TAGS (localStorage)
    ══════════════════════════════════════════════════════════════════════════════ */
 
+// Tags vêm exclusivamente do campo "PROJETO / EVENTO / AÇÃO" do JSON principal.
+// O registro em memória é reconstruído via loadFromBase(base) sempre que os dados
+// são carregados. Mutações manuais (add/remove) foram removidas: a fonte é o JSON.
 var TagsManager = {
-  KEY: "painel_gaq_tags",
-  LIST_KEY: "painel_gaq_tag_list",
+  PROJ_COL: "PROJETO / EVENTO / AÇÃO",
+  _byPk: {},      // ProcessKey -> [tag]
+  _byAlt: {},     // TicketSD   -> [tag]
+  _list: [],      // lista única de tags ordenada
 
-  getAll() { try { return JSON.parse(localStorage.getItem(this.KEY) || "{}"); } catch { return {}; } },
-  // pk = ProcessKey principal, altPk = TicketSD (chave secundária para processos que eram só SD)
+  loadFromBase(base) {
+    this._byPk = {};
+    this._byAlt = {};
+    const setList = new Set();
+    if (!Array.isArray(base)) { this._list = []; return; }
+    const col = this.PROJ_COL;
+    base.forEach(r => {
+      const raw = (r && r[col] != null ? String(r[col]) : "").trim();
+      if (!raw) return;
+      const tag = raw;
+      setList.add(tag);
+      if (r.ProcessKey) this._byPk[r.ProcessKey] = [tag];
+      if (r.TicketSD)   this._byAlt[r.TicketSD]  = [tag];
+    });
+    this._list = [...setList].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  },
+
   getForProcess(pk, altPk) {
-    if (!pk && !altPk) return [];
-    const all = this.getAll();
-    const tagsPk  = (pk && all[pk]) ? all[pk] : [];
-    const tagsAlt = (altPk && altPk !== pk && all[altPk]) ? all[altPk] : [];
-    // Merge sem duplicatas: prioriza pk, complementa com altPk
-    if (tagsAlt.length > 0 && tagsPk.length === 0 && pk) {
-      // Auto-migração: copia tags da chave SD para a chave ProcessKey atual
-      all[pk] = [...tagsAlt];
-      delete all[altPk];
-      localStorage.setItem(this.KEY, JSON.stringify(all));
-      return all[pk];
-    }
-    if (tagsAlt.length > 0 && tagsPk.length > 0) {
-      const merged = [...new Set([...tagsPk, ...tagsAlt])];
-      // Consolida tudo na chave principal
-      if (pk) { all[pk] = merged; delete all[altPk]; localStorage.setItem(this.KEY, JSON.stringify(all)); }
-      return merged;
-    }
-    return tagsPk;
+    if (pk && this._byPk[pk]) return this._byPk[pk];
+    if (altPk && this._byAlt[altPk]) return this._byAlt[altPk];
+    return [];
   },
-  setForProcess(pk, tags) {
-    const all = this.getAll(); all[pk] = tags;
-    localStorage.setItem(this.KEY, JSON.stringify(all));
-  },
-  getTagList() { try { return JSON.parse(localStorage.getItem(this.LIST_KEY) || "[]"); } catch { return []; } },
-  addToTagList(tag) {
-    const list = this.getTagList();
-    if (!list.includes(tag)) { list.push(tag); localStorage.setItem(this.LIST_KEY, JSON.stringify(list)); }
-  },
-  removeFromTagList(tag) {
-    const list = this.getTagList().filter(t => t !== tag);
-    localStorage.setItem(this.LIST_KEY, JSON.stringify(list));
-  },
-  addTag(pk, tag, altPk) {
-    if (!pk) return;
-    const tags = this.getForProcess(pk, altPk);
-    if (!tags.includes(tag)) { tags.push(tag); this.setForProcess(pk, tags); this.addToTagList(tag); }
-  },
-  removeTag(pk, tag, altPk) {
-    if (!pk) return;
-    const updated = this.getForProcess(pk, altPk).filter(t => t !== tag);
-    this.setForProcess(pk, updated);
-  },
+  getTagList() { return this._list.slice(); },
   getTagColor(tag) {
     let h = 0; for (let i = 0; i < tag.length; i++) h = tag.charCodeAt(i) + ((h << 5) - h);
     return TAG_COLORS[Math.abs(h) % TAG_COLORS.length];
   },
-  exportTags() { return { tags: this.getAll(), tagList: this.getTagList() }; },
-  importTags(data) {
-    if (data && data.tags) localStorage.setItem(this.KEY, JSON.stringify(data.tags));
-    if (data && data.tagList) localStorage.setItem(this.LIST_KEY, JSON.stringify(data.tagList));
-  },
+  // Compat: mutações são no-op (a fonte é o JSON principal).
+  setForProcess() {},
+  addToTagList() {},
+  removeFromTagList() {},
+  addTag() {},
+  removeTag() {},
+  exportTags() { return { tags: { ...this._byPk }, tagList: this.getTagList() }; },
+  importTags() { /* desativado: tags vêm do campo "PROJETO / EVENTO / AÇÃO" */ },
 };
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -1133,5 +1341,211 @@ function calcDirectorPriority(proc) {
     entregaCurta: diasEntregaUteis != null && diasEntregaUteis >= 0 && diasEntregaUteis <= 15,
     semDataEntrega: !proc.dataEntrega,
     janelaComprometida: folgaEntrega != null && folgaEntrega < 0,
+  };
+}
+
+/* ── Detecção de Demandas Recorrentes (NLP + clustering) ────────────────────
+   Pipeline:
+   1. Filtra processos por anos de interesse (default: 2024, 2025, 2026).
+   2. Para cada Objeto, extrai n-gramas via kw() (já remove stopwords).
+   3. Marca n-gramas "distintivos" — aparecem em 2..maxDocs processos.
+   4. Conta pares de processos que compartilham ≥ minSharedKw n-gramas
+      distintivos e une (union-find).
+   5. Cluster vira "recorrente" se: ≥ 2 anos distintos OU ≥ 3 processos.
+   6. Estima mês previsto = moda(dataEntrega.mes) ou fallback moda(mesAbertura).
+   7. Calcula confiança combinando spread anual + nº processos + variância
+      circular do mês (Dez↔Jan próximos). */
+function _modeIntArr(arr) {
+  if (!arr || !arr.length) return null;
+  const counts = {};
+  arr.forEach(v => { counts[v] = (counts[v] || 0) + 1; });
+  let bestKey = null, bestCount = 0;
+  for (const k in counts) {
+    if (counts[k] > bestCount) { bestCount = counts[k]; bestKey = k; }
+  }
+  return bestKey == null ? null : +bestKey;
+}
+
+function _circularMonthSpread(months) {
+  if (!months || !months.length) return 99;
+  // Variância circular: Dez (11) e Jan (0) ficam a 1 mês de distância
+  const n = months.length;
+  let sumSin = 0, sumCos = 0;
+  months.forEach(m => {
+    const ang = (m / 12) * 2 * Math.PI;
+    sumSin += Math.sin(ang); sumCos += Math.cos(ang);
+  });
+  const r = Math.sqrt(sumSin*sumSin + sumCos*sumCos) / n;
+  // r próximo de 1 = todos no mesmo mês; próximo de 0 = espalhados
+  // Retorna em "meses equivalentes de desvio"
+  return Math.round((1 - r) * 6 * 10) / 10;
+}
+
+function _capWords(s) {
+  return (s || "").split(" ").map(w => w.length ? w.charAt(0).toUpperCase() + w.slice(1) : w).join(" ");
+}
+
+function detectRecurrentes(base, opts) {
+  opts = opts || {};
+  const anos = opts.anos || [new Date().getFullYear() - 2, new Date().getFullYear() - 1, new Date().getFullYear()];
+  const minDocs = opts.minDocs || 2;
+  const maxDocs = opts.maxDocs || 25;
+  const minSharedKw = opts.minSharedKw || 2;
+  const minLen = opts.minLen || 5;
+
+  const procs = (base || []).filter(p => {
+    const ano = p.anoRC || p.anoSD;
+    return ano && anos.indexOf(ano) >= 0 && p.Objeto;
+  });
+
+  if (procs.length === 0) {
+    return { recurrentes: [], calendario: Array.from({ length: 12 }, (_, m) => ({ mes: m, eventos: [] })), meta: { totalProcs: 0, totalRecurrentes: 0, anosCobertos: anos, params: { minDocs, maxDocs, minSharedKw } } };
+  }
+
+  // 1. extrai n-gramas por processo
+  const procKw = procs.map(p => new Set(kw(p.Objeto || "", minLen)));
+
+  // 2. frequência global
+  const kwFreq = new Map();
+  procKw.forEach(ks => { ks.forEach(k => kwFreq.set(k, (kwFreq.get(k) || 0) + 1)); });
+
+  // 3. n-gramas distintivos
+  const distinctive = new Map();
+  kwFreq.forEach((c, k) => { if (c >= minDocs && c <= maxDocs) distinctive.set(k, c); });
+
+  if (distinctive.size === 0) {
+    return { recurrentes: [], calendario: Array.from({ length: 12 }, (_, m) => ({ mes: m, eventos: [] })), meta: { totalProcs: procs.length, totalRecurrentes: 0, anosCobertos: anos, params: { minDocs, maxDocs, minSharedKw } } };
+  }
+
+  // 4. inverted index distintivo
+  const kwToProcs = new Map();
+  procKw.forEach((ks, i) => {
+    ks.forEach(k => {
+      if (distinctive.has(k)) {
+        if (!kwToProcs.has(k)) kwToProcs.set(k, []);
+        kwToProcs.get(k).push(i);
+      }
+    });
+  });
+
+  // 5. union-find por pares com >= minSharedKw n-gramas distintivos em comum
+  const parent = procs.map((_, i) => i);
+  function find(x) { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+  function union(a, b) { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; }
+
+  const pairScores = new Map();
+  kwToProcs.forEach(arr => {
+    if (arr.length > maxDocs) return;
+    for (let i = 0; i < arr.length; i++) {
+      for (let j = i + 1; j < arr.length; j++) {
+        const a = arr[i], b = arr[j];
+        const key = a < b ? a + ":" + b : b + ":" + a;
+        const next = (pairScores.get(key) || 0) + 1;
+        pairScores.set(key, next);
+        if (next === minSharedKw) union(a, b);
+      }
+    }
+  });
+
+  // 6. agrupa clusters
+  const clusters = new Map();
+  procs.forEach((p, i) => {
+    const root = find(i);
+    if (!clusters.has(root)) clusters.set(root, { processos: [], keywords: new Map() });
+    const cl = clusters.get(root);
+    cl.processos.push(p);
+    procKw[i].forEach(k => {
+      if (distinctive.has(k)) cl.keywords.set(k, (cl.keywords.get(k) || 0) + 1);
+    });
+  });
+
+  // 7. filtra e enriquece
+  const hojeAno = new Date().getFullYear();
+  const recurrentes = [];
+  clusters.forEach(cl => {
+    const total = cl.processos.length;
+    if (total < 2) return;
+    const yearsSet = new Set(cl.processos.map(p => p.anoRC || p.anoSD).filter(Boolean));
+    if (yearsSet.size < 2 && total < 3) return;
+
+    const topKws = [...cl.keywords.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].split(" ").length - b[0].split(" ").length || a[0].length - b[0].length)
+      .slice(0, 4);
+    const label = topKws[0] ? _capWords(topKws[0][0]) : "Demanda recorrente";
+
+    const monthsEntrega = cl.processos.map(p => p.dataEntrega ? p.dataEntrega.getMonth() : null).filter(m => m !== null);
+    const monthsAbertura = cl.processos.map(p => p.mesAbertura).filter(m => m !== null && m !== undefined);
+    const useEntrega = monthsEntrega.length >= 2;
+    const monthsForMode = useEntrega ? monthsEntrega : monthsAbertura;
+    const mesPrevisto = _modeIntArr(monthsForMode);
+    const mesSource = useEntrega ? "entrega" : (monthsAbertura.length ? "abertura" : "—");
+
+    const leads = cl.processos.map(p => p.diasTotais || 0).filter(d => d > 0);
+    const avgLead = leads.length ? Math.round(leads.reduce((s, v) => s + v, 0) / leads.length) : 0;
+
+    const years = {};
+    cl.processos.forEach(p => { const a = p.anoRC || p.anoSD; if (a) years[a] = (years[a] || 0) + 1; });
+
+    const areas = {};
+    cl.processos.forEach(p => { const a = p["Área Requisitante"] || "—"; areas[a] = (areas[a] || 0) + 1; });
+    const topAreas = Object.entries(areas).sort((a, b) => b[1] - a[1]).slice(0, 3);
+
+    const spread = _circularMonthSpread(monthsForMode);
+    // confiança: 0..100. Combina (multi-ano), (count), (consistência mês), (cobertura cron grama via leads)
+    const conf =
+      (yearsSet.size >= 2 ? 35 : 12) +
+      Math.min(25, total * 5) +
+      (spread <= 0.5 ? 25 : spread <= 1 ? 18 : spread <= 1.8 ? 10 : 0) +
+      (leads.length >= 2 ? 10 : 0) +
+      (useEntrega ? 5 : 0);
+    const confidence = Math.max(0, Math.min(100, Math.round(conf)));
+
+    // Sugestão de abertura de SD: mesPrevisto - ceil(avgLead / 21 d.u. por mês útil)
+    const mesesLead = avgLead > 0 ? Math.ceil(avgLead / 21) : 0;
+    const mesSDSugerido = mesPrevisto != null ? ((mesPrevisto - mesesLead + 12) % 12) : null;
+
+    // Anos faltando (gap analysis): se algum ano da janela não aparece, marca
+    const anosFaltando = anos.filter(a => !years[a]);
+    const proxAnoEsperado = anos.indexOf(hojeAno) >= 0 ? hojeAno : Math.max(...anos.filter(a => a <= hojeAno));
+    const aindaEsteAno = years[proxAnoEsperado] ? null : proxAnoEsperado;
+
+    recurrentes.push({
+      label,
+      keywords: topKws.map(([k]) => k),
+      processos: cl.processos.slice().sort((a, b) => (b.anoRC || b.anoSD || 0) - (a.anoRC || a.anoSD || 0)),
+      total,
+      anos: years,
+      yearsSet: [...yearsSet].sort(),
+      mesPrevisto,
+      mesSource,
+      monthsConsidered: monthsForMode.length,
+      avgLead,
+      mesSDSugerido,
+      areas,
+      topAreas,
+      objetoExemplo: cl.processos[0].Objeto || "",
+      confidence,
+      spread,
+      anosFaltando,
+      aindaEsteAno,
+    });
+  });
+
+  recurrentes.sort((a, b) => b.confidence - a.confidence || b.total - a.total);
+
+  const calendario = Array.from({ length: 12 }, (_, m) => ({
+    mes: m,
+    eventos: recurrentes.filter(r => r.mesPrevisto === m).sort((a, b) => b.confidence - a.confidence || b.total - a.total),
+  }));
+
+  return {
+    recurrentes,
+    calendario,
+    meta: {
+      totalProcs: procs.length,
+      totalRecurrentes: recurrentes.length,
+      anosCobertos: anos,
+      params: { minDocs, maxDocs, minSharedKw, minLen },
+    },
   };
 }

@@ -8,6 +8,7 @@ logs/
 # Dados sensiveis e gerados localmente
 dados.js
 tags.js
+base_fracionamento.js
 apikey.js
 auth.backup.js
 _test_sha256.js
@@ -19,6 +20,13 @@ chamados_servicedesk.js
 # Backups e pacotes locais
 Versões anteriores/
 *.zip
+
+# Arquivos aguardando revisao para exclusao
+outros/
+
+# Documentacao tecnica interna — NAO versionar (contem detalhes de regras
+# de negocio internas da GAQ; manter apenas na pasta local/OneDrive)
+documentos/
 
 # Logs temporarios
 *.log

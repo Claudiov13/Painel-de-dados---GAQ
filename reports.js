@@ -332,6 +332,220 @@ function gerarRelatorioOperacional({ processos, area, meta }) {
     "</body></html>";
 }
 
+/* ── Relatório por Tag (PROJETO / EVENTO / AÇÃO) ──────────────────────────
+   Recebe { tag, processos, meta } e devolve o HTML completo, com o mesmo
+   layout do Relatório_Encontro_Nacional_DPS.html (KPIs, agregados por área
+   e responsável, tabela detalhada com objeto/histórico, auto-print). */
+function gerarRelatorioPorTag(_ref) {
+  var tag = _ref.tag || "—";
+  var processos = _ref.processos || [];
+  var meta = _ref.meta || null;
+  var nomeBase = meta ? meta.nomeArq : "—";
+  var atualizado = meta ? meta.atualizadoEm : "—";
+  var gerOut = new Date().toLocaleString("pt-BR");
+
+  var enc = function(s) {
+    if (s === null || s === undefined) return "";
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  };
+  var parseReportDate = function(v) {
+    if (v == null || v === "" || v === "—") return null;
+    if (v instanceof Date) return isNaN(v) ? null : v;
+
+    if (typeof pd === "function") {
+      var parsed = pd(v);
+      if (parsed) return parsed;
+    }
+
+    var s = String(v).trim();
+    if (!s || s === "0" || s === "00/01/1900") return null;
+
+    var n = Number(s.replace(",", "."));
+    if (!isNaN(n) && n > 1000 && n < 100000) {
+      var u = new Date((n - 25569) * 86400000);
+      return new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate());
+    }
+
+    var m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$/);
+    if (m) {
+      var y = m[3].length === 2 ? "20" + m[3] : m[3];
+      return new Date(+y, +m[2] - 1, +m[1]);
+    }
+
+    var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) return new Date(+iso[1], +iso[2] - 1, +iso[3]);
+
+    return null;
+  };
+  var fmtD = function(d) {
+    var parsed = parseReportDate(d);
+    return parsed ? parsed.toLocaleDateString("pt-BR") : "—";
+  };
+  var nrmS = function(s) { return String(s || "").toLowerCase(); };
+  var stBadge = function(st) {
+    var s = nrmS(st);
+    var bg = "#ecf0f1", co = "#7f8c8d";
+    if (s.indexOf("cancelad") >= 0 || s.indexOf("fracass") >= 0) { bg = "#fde2e2"; co = "#c0392b"; }
+    else if (s.indexOf("andament") >= 0) { bg = "#d6eaf8"; co = "#1f6feb"; }
+    else if (s.indexOf("conclu") >= 0) { bg = "#d4efdf"; co = "#1e8449"; }
+    return '<span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;background:' + bg + ';color:' + co + ';-webkit-print-color-adjust:exact;print-color-adjust:exact">' + enc(st || "—") + "</span>";
+  };
+
+  var total = processos.length;
+  var em = processos.filter(function(r) { return nrmS(r.status).indexOf("andament") >= 0; }).length;
+  var ca = processos.filter(function(r) { return nrmS(r.status).indexOf("cancelad") >= 0 || nrmS(r.status).indexOf("fracass") >= 0; }).length;
+  var co = processos.filter(function(r) { return nrmS(r.status).indexOf("conclu") >= 0; }).length;
+
+  var byArea = {};
+  processos.forEach(function(r) { var k = r["Área Requisitante"] || "—"; byArea[k] = (byArea[k] || 0) + 1; });
+  var byResp = {};
+  processos.forEach(function(r) {
+    var k = r.Comprador || r.Avaliador || r.Pregoeiro || r.cplResp || "—";
+    byResp[k] = (byResp[k] || 0) + 1;
+  });
+
+  var aggRows = function(obj) {
+    var entries = Object.keys(obj).map(function(k) { return [k, obj[k]]; }).sort(function(a, b) { return b[1] - a[1]; });
+    return entries.map(function(e) {
+      return '<tr><td>' + enc(e[0]) + '</td><td style="text-align:center"><b>' + e[1] + '</b></td></tr>';
+    }).join("");
+  };
+
+  // Campos Suite Sesc — lookup tolerante a caixa/acentos/espacos no cabecalho,
+  // mesmo criterio do bloco Suite Sesc do modal de timeline (index.html).
+  var suiteInfoOf = function(r) {
+    var fk = function(id) {
+      var keys = Object.keys(r);
+      for (var ki = 0; ki < keys.length; ki++) {
+        var kn = (typeof nrm === "function" ? nrm(keys[ki]) : String(keys[ki]).toLowerCase()).replace(/[\s_\-]/g, "");
+        if (kn === id) return keys[ki];
+      }
+      return null;
+    };
+    var txt = function(v) { return v == null ? "" : String(v).trim(); };
+    var kId = fk("identificadorsuitesesc"), kSt = fk("statussuitesesc"), kResp = fk("responsabilidadesuitesesc"), kHab = fk("habilitadaemsuitesesc");
+    var id = txt(kId && r[kId]), st = txt(kSt && r[kSt]), resp = txt(kResp && r[kResp]), hab = txt(kHab && r[kHab]);
+    return (id || st || resp || hab) ? { id: id, st: st, resp: resp, hab: hab } : null;
+  };
+
+  var hoje = new Date();
+  var detRows = processos.map(function(r, i) {
+    var resp = r.Comprador || r.Avaliador || r.Pregoeiro || r.cplResp || "—";
+    var obj = r.Objeto || "—";
+    var hist = (r["HISTORICO DO PROCESSO"] || "").toString().trim();
+    var histShort = hist.length > 800 ? hist.slice(0, 800) + "…" : hist;
+    var rc = r.NumRC || "—";
+    var ticket = r.TicketSD || "—";
+    var stSimp = r.status || "—";
+    var stDet = r.statusDet || "";
+
+    var abert = parseReportDate(r.aberturaSD || r["Data da abertura do SD"]);
+    var encDt = r["Data do encerramento"];
+    var encParsed = parseReportDate(encDt);
+    var baseDt = nrmS(stSimp).indexOf("andament") >= 0 ? hoje : (encParsed || hoje);
+    var aging = "—";
+    if (abert instanceof Date) {
+      aging = Math.max(0, Math.round((baseDt - abert) / 86400000));
+    }
+    var recebRc = r.aberturaRC || r["DATA DO RECEBIMENTO DA RC"] || r["Data Recebimento RC"] || r["Recebimento RC"];
+    var prev = r.dataEntrega || r["PREVISÃO ENTREGA / INÍCIO PRESTAÇÃO DO SERVIÇO DA RC"] || r["Data prevista entrega / início prestação do serviço"] || r["PREVISAO ENTREGA"] || r["DATA ENTREGA"];
+
+    var th = "padding:6px 8px;border-bottom:1px solid #e0e7ef;font-size:11px;vertical-align:top;";
+    var c = th + "text-align:center;";
+
+    var main =
+      '<tr>' +
+      '<td style="' + c + '">' + (i + 1) + '</td>' +
+      '<td style="' + th + '"><b>' + enc(rc) + '</b></td>' +
+      '<td style="' + c + '">' + enc(ticket) + '</td>' +
+      '<td style="' + th + '">' + enc(r["Área Requisitante"] || "—") + '</td>' +
+      '<td style="' + th + '">' + enc(resp) + '</td>' +
+      '<td style="' + th + '">' + enc(r["Tipo de análise"] || r.Modalidade || "—") + '</td>' +
+      '<td style="' + th + '">' + stBadge(stSimp) + '<div style="font-size:9.5px;color:#666;margin-top:2px">' + enc(stDet) + '</div></td>' +
+      '<td style="' + c + '">' + fmtD(abert) + '</td>' +
+      '<td style="' + c + '">' + fmtD(recebRc) + '</td>' +
+      '<td style="' + c + '">' + fmtD(prev) + '</td>' +
+      '<td style="' + c + '"><b>' + aging + '</b></td>' +
+      '</tr>';
+
+    // Suite Sesc: status, com quem esta e data — apenas para processos em andamento
+    var suite = nrmS(stSimp).indexOf("andament") >= 0 ? suiteInfoOf(r) : null;
+    var habTxt = "";
+    if (suite && suite.hab) {
+      var habParsed = parseReportDate(suite.hab);
+      habTxt = habParsed ? habParsed.toLocaleDateString("pt-BR") : suite.hab;
+    }
+    var suiteLine = suite
+      ? '<div style="font-size:10.5px;margin-top:5px;background:#e8f6f1;border:1px solid #16a08566;border-radius:6px;padding:4px 9px;display:inline-block;-webkit-print-color-adjust:exact;print-color-adjust:exact">' +
+          '<b style="color:#0e7a67;text-transform:uppercase;font-size:9px;letter-spacing:.04em">Suite Sesc</b>' +
+          (suite.id ? ' &nbsp;<b style="color:#0e7a67">' + enc(suite.id) + '</b>' : '') +
+          (suite.st ? ' &nbsp;·&nbsp; Status: <b>' + enc(suite.st) + '</b>' : '') +
+          (suite.resp ? ' &nbsp;·&nbsp; Com quem está: <b>' + enc(suite.resp) + '</b>' : '') +
+          (habTxt ? ' &nbsp;·&nbsp; Habilitada em: <b>' + enc(habTxt) + '</b>' : '') +
+        '</div>'
+      : '';
+    var detail =
+      '<tr><td></td><td colspan="10" style="background:#f8fafc;border-bottom:2px solid #d6e0ee;padding:8px 10px">' +
+      '<div style="font-size:11px"><b>Objeto:</b> ' + enc(obj) + '</div>' +
+      (hist ? '<div style="font-size:10.5px;color:#475569;margin-top:4px;font-style:italic"><b>Histórico:</b> ' + enc(histShort) + '</div>' : '') +
+      suiteLine +
+      '</td></tr>';
+
+    return main + detail;
+  }).join("");
+
+  var PC = "-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact;";
+  var html =
+    '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Relatório — ' + enc(tag) + '</title>' +
+    '<style>' +
+    '*{box-sizing:border-box}body{font-family:"Segoe UI",Arial,sans-serif;color:#1f2937;background:#eef3f8;margin:0;padding:18px}' +
+    'h1{font-size:18px;margin:0}h2{font-size:13px;color:#1a5276;margin:18px 0 8px;border-left:4px solid #2e86c1;padding-left:10px}' +
+    '.hdr{background:linear-gradient(135deg,#082445,#163a63);color:#fff;border-radius:12px;padding:18px 22px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;' + PC + '}' +
+    '.kpis{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 18px}' +
+    '.kpi{background:#fff;border-radius:10px;padding:14px 16px;border-top:4px solid #2e86c1;flex:1;min-width:130px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.06)}' +
+    '.kpi .v{font-size:26px;font-weight:800}.kpi .l{font-size:10px;color:#666;font-weight:600;text-transform:uppercase}' +
+    '.kpi.blue{border-top-color:#2e86c1}.kpi.blue .v{color:#2e86c1}' +
+    '.kpi.green{border-top-color:#27ae60}.kpi.green .v{color:#27ae60}' +
+    '.kpi.red{border-top-color:#c0392b}.kpi.red .v{color:#c0392b}' +
+    '.grid2{display:flex;gap:14px;flex-wrap:wrap}.grid2>div{flex:1;min-width:240px}' +
+    'table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #dbe3ee;border-radius:8px;overflow:hidden;font-size:11px}' +
+    'th{background:#082445;color:#fff;padding:7px 8px;text-align:left;font-size:10.5px;' + PC + '}' +
+    '.footer{text-align:center;font-size:10px;color:#999;margin-top:18px;border-top:1px solid #e0e7ef;padding-top:10px}' +
+    '@media print{body{background:#fff;padding:0}.kpi,table{box-shadow:none}table{page-break-inside:auto}tr{page-break-inside:avoid}}' +
+    '</style></head><body>' +
+
+    '<div class="hdr">' +
+    '<div><h1>Sesc — Relatório por Projeto/Evento: <span style="color:#9ec5e8">' + enc(tag) + '</span></h1>' +
+    '<div style="font-size:11px;opacity:.85;margin-top:4px">Listagem dos processos vinculados &middot; gerado em ' + enc(gerOut) + '</div>' +
+    '<div style="font-size:11px;opacity:.85">Fonte: campo "PROJETO / EVENTO / AÇÃO" · Base: ' + enc(nomeBase) + ' · Atualizado: ' + enc(atualizado) + '</div></div>' +
+    '<div style="text-align:right;font-size:11px;opacity:.85">GAQ — Gerência de Aquisições · DN</div>' +
+    '</div>' +
+
+    '<div class="kpis">' +
+    '<div class="kpi blue"><div class="v">' + total + '</div><div class="l">Total</div></div>' +
+    '<div class="kpi blue"><div class="v">' + em + '</div><div class="l">Em andamento</div></div>' +
+    '<div class="kpi red"><div class="v">' + ca + '</div><div class="l">Cancelados / Fracassados</div></div>' +
+    '<div class="kpi green"><div class="v">' + co + '</div><div class="l">Concluídos</div></div>' +
+    '</div>' +
+
+    '<div class="grid2"><div><h2>Por Área Requisitante</h2>' +
+    '<table><thead><tr><th>Área</th><th style="text-align:center">Qtd</th></tr></thead><tbody>' + aggRows(byArea) + '</tbody></table></div>' +
+    '<div><h2>Por Responsável (Comprador / Avaliador / Pregoeiro)</h2>' +
+    '<table><thead><tr><th>Responsável</th><th style="text-align:center">Qtd</th></tr></thead><tbody>' + aggRows(byResp) + '</tbody></table></div></div>' +
+
+    '<h2>Detalhamento dos ' + total + ' processos</h2>' +
+    '<table><thead><tr>' +
+    '<th style="text-align:center">#</th><th>Nº RC</th><th>Ticket</th><th>Área</th><th>Responsável</th>' +
+    '<th>Tipo / Modalidade</th><th>Status</th><th>Abertura SD</th><th>Recebim. RC</th><th>Prev. entrega</th><th>Dias corridos</th>' +
+    '</tr></thead><tbody>' + detRows + '</tbody></table>' +
+
+    '<div class="footer">Gerado automaticamente pelo Painel GAQ · ' + enc(gerOut) + ' · Base: ' + enc(nomeBase) + '</div>' +
+    '<script>setTimeout(function(){ try{ window.print(); }catch(e){} }, 600);<\/script>' +
+    '</body></html>';
+
+  return html;
+}
+
 function _pdfCommon(accentColor) {
   var PRINT_COLOR = "-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact;";
   var thS = "padding:7px 10px;background:"+accentColor+";color:#fff;font-size:11px;font-weight:700;text-align:left;"+PRINT_COLOR;
@@ -381,7 +595,7 @@ function _pdfCommon(accentColor) {
   return {row:row,kpi:kpi,tbl:tbl,h2:h2,sazon:sazon,funil:funil,statusDetSection:statusDetSection,PRINT_COLOR:PRINT_COLOR};
 }
 
-function gerarRelatorioGAQSexta({ processos, area, meta, fBase }) {
+function gerarRelatorioGAQSexta({ processos, area, meta, fBase, overrides }) {
   var hoje = new Date().toLocaleDateString("pt-BR", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   var hora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
   var nomeBase = meta ? meta.nomeArq : "—";
@@ -430,29 +644,47 @@ function gerarRelatorioGAQSexta({ processos, area, meta, fBase }) {
   var areaTable = areaRows ? C.tbl(["Área Requisitante", "Em Andamento", "Críticos (>50 d.u.)"], areaRows) : "";
 
   // Lista completa de processos em andamento ordenada por diasTotais desc
+  // overrides: edições pontuais por ProcessKey ({status, statusDet, obs}) feitas
+  // na revisão antes de gerar — valem só para este PDF, sem alterar a base.
+  var ov = overrides || {};
+  var escHtml = function(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); };
+  var temObs = Object.keys(ov).some(function(k){ return ov[k] && ov[k].obs; });
   var listaOrdenada = emA.slice().sort(function(a, b){ return b.diasTotais - a.diasTotais; });
   var listaRows = listaOrdenada.map(function(r, idx) {
     var corDu = r.diasTotais > 100 ? "#922b21" : r.diasTotais > 60 ? "#c0392b" : r.diasTotais > 30 ? "#e67e22" : "#27ae60";
     var duSD = r.diasAgingSD > 0 ? r.diasAgingSD : (r.diasSD > 0 ? r.diasSD : "—");
     var corSD = (r.diasAgingSD||r.diasSD) > 50 ? "#c0392b" : (r.diasAgingSD||r.diasSD) > 20 ? "#e67e22" : "#27ae60";
-    return C.row([
+    var o = ov[r.ProcessKey] || {};
+    var tag = (r["PROJETO / EVENTO / AÇÃO"] || "").toString().trim();
+    var prevEntrega = "—";
+    if (r.dataEntrega) {
+      var corPrev = r.diasParaEntrega != null && r.diasParaEntrega < 0 ? "#c0392b" : r.diasParaEntrega != null && r.diasParaEntrega <= 15 ? "#e67e22" : "#27ae60";
+      prevEntrega = "<span style=\"color:" + corPrev + ";font-weight:700;white-space:nowrap\">" + r.dataEntrega.toLocaleDateString("pt-BR") + "</span>";
+    }
+    var cells = [
       idx + 1,
       r.NumRC || "—",
       r.TicketSD || "—",
       r.NumProcesso || "—",
+      tag || "—",
       r.Comprador || "—",
       r.Avaliador || "—",
       r.Modalidade || "—",
       r["Área Requisitante"] || "—",
       (r.Objeto || "—").slice(0, 500) + ((r.Objeto || "").length > 500 ? "…" : ""),
-      r.status || "—",
-      r.statusDet || "—",
+      o.status ? escHtml(o.status) : (r.status || "—"),
+      o.statusDet ? escHtml(o.statusDet) : (r.statusDet || "—"),
+      prevEntrega,
       "<span style=\"color:" + corDu + ";font-weight:800\">" + r.diasTotais + "</span>",
       duSD !== "—" ? "<span style=\"color:" + corSD + ";font-weight:700\">" + duSD + "</span>" : "—"
-    ]);
+    ];
+    if (temObs) cells.push(o.obs ? "<span style=\"color:#b9770e;font-style:italic\">" + escHtml(o.obs) + "</span>" : "—");
+    return C.row(cells);
   }).join("");
+  var listaHeaders = ["#","RC","Pré-compra","Nº Processo","TAG","Comprador","Avaliador","Modalidade","Área","Objeto","Status","Status Det.","Prev. Entrega","d.u. RC","d.u. pré-compra"];
+  if (temObs) listaHeaders.push("Obs.");
   var listaTable = listaRows
-    ? C.tbl(["#","RC","Pré-compra","Nº Processo","Comprador","Avaliador","Modalidade","Área","Objeto","Status","Status Det.","d.u. RC","d.u. pré-compra"], listaRows)
+    ? C.tbl(listaHeaders, listaRows)
     : "<p style=\"color:#888;font-size:12px\">Nenhum processo em andamento.</p>";
 
   var css = "*{box-sizing:border-box;margin:0;padding:0;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}" +
@@ -815,6 +1047,192 @@ function addBD(date, n) {
   let added = 0;
   while (added < n) { d.setDate(d.getDate()+1); const w=d.getDay(); if(w&&w<6) added++; }
   return d;
+}
+
+function gerarRelatorioCronograma({ processos, mes, ano, area, meta }) {
+  processos = (processos || []).slice().sort(function(a,b){ return a.dataEntrega - b.dataEntrega; });
+  var MESES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+  var nomeMes = MESES[mes] + " de " + ano;
+  var hoje = new Date().toLocaleDateString("pt-BR", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  var hora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  var nomeBase = meta ? meta.nomeArq : "—";
+  var titulo = (!area || area === "TODAS" || area === "Todas as Áreas") ? "Todas as Áreas" : area;
+  var filtroInfo = (!area || area === "TODAS" || area === "Todas as Áreas") ? "" : " · Área: <strong>" + area + "</strong>";
+  var accent = "#b45309";
+  var C = _pdfCommon(accent);
+
+  var total = processos.length;
+  var vencidos = processos.filter(function(r){ return r.diasParaEntrega !== null && r.diasParaEntrega < 0; });
+  var urgentes = processos.filter(function(r){ return r.diasParaEntrega !== null && r.diasParaEntrega >= 0 && r.diasParaEntrega <= 7; });
+  var proximos = processos.filter(function(r){ return r.diasParaEntrega !== null && r.diasParaEntrega > 7 && r.diasParaEntrega <= 30; });
+  var futuros = processos.filter(function(r){ return r.diasParaEntrega !== null && r.diasParaEntrega > 30; });
+
+  function labelDias(d) {
+    if (d === null || d === undefined) return "—";
+    if (d < 0) return "Vencido há " + Math.abs(d) + " d";
+    if (d === 0) return "Hoje";
+    if (d === 1) return "Amanhã";
+    return "em " + d + " d";
+  }
+  function corDias(d) {
+    if (d === null || d === undefined) return "#8a94a6";
+    if (d < 0) return "#c0392b";
+    if (d <= 7) return "#e67e22";
+    if (d <= 30) return "#d4a017";
+    return "#27ae60";
+  }
+
+  function gKpi(label, value, valColor) {
+    return "<div style=\"background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.18);border-radius:12px;padding:14px 16px;-webkit-print-color-adjust:exact;print-color-adjust:exact\">"+
+      "<div style=\"font-size:10px;font-weight:600;opacity:.78;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px;color:#fff\">"+label+"</div>"+
+      "<div style=\"font-size:30px;font-weight:700;line-height:1;color:"+(valColor||"#fff")+";letter-spacing:-.02em;font-variant-numeric:tabular-nums\">"+value+"</div>"+
+      "</div>";
+  }
+
+  var listaRows = processos.map(function(r){
+    var d = r.diasParaEntrega;
+    var cor = corDias(d);
+    var dataFmt = r.dataEntrega ? r.dataEntrega.toLocaleDateString("pt-BR") : "—";
+    return C.row([
+      dataFmt,
+      "<span style=\"color:"+cor+";font-weight:700\">"+labelDias(d)+"</span>",
+      r.NumRC || r.TicketSD || "—",
+      r["Área Requisitante"] || "—",
+      r.Modalidade || "—",
+      r.faseSubarea || "—",
+      r.statusDet || r.status || "—",
+      r.respAtivo || r.respNCL || r.Pregoeiro || r.AnalistaContrato || "—",
+      (r.Objeto || "—").slice(0, 500) + ((r.Objeto || "").length > 500 ? "…" : "")
+    ]);
+  }).join("");
+
+  // Resumo por área
+  var areaMap = {}; processos.forEach(function(r){ var a = r["Área Requisitante"] || "N/I"; areaMap[a] = (areaMap[a] || 0) + 1; });
+  var areaTable = C.tbl(["Área Requisitante","Qtd"], Object.entries(areaMap).sort(function(a,b){return b[1]-a[1];}).map(function(e){return C.row([e[0], e[1]]);}).join(""));
+  var modMap = {}; processos.forEach(function(r){ var m = r.Modalidade || "N/I"; modMap[m] = (modMap[m] || 0) + 1; });
+  var modTable = C.tbl(["Modalidade","Qtd"], Object.entries(modMap).sort(function(a,b){return b[1]-a[1];}).map(function(e){return C.row([e[0], e[1]]);}).join(""));
+
+  var css = "*{box-sizing:border-box;margin:0;padding:0}"+
+    "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f7;color:#1d1d1f;padding:20px}"+
+    "@media print{body{background:#fff;padding:8px}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}}";
+
+  return "<!DOCTYPE html><html lang=\"pt-BR\"><head><meta charset=\"UTF-8\"><title>Cronograma — "+nomeMes+"</title><style>"+css+"</style></head><body>"+
+    "<div style=\"background:linear-gradient(135deg,#78350f 0%,#d97706 100%);color:#fff;border-radius:16px;padding:24px 28px;margin-bottom:18px;box-shadow:0 4px 16px rgba(120,53,15,.18);-webkit-print-color-adjust:exact;print-color-adjust:exact\">"+
+      "<div style=\"display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:18px\">"+
+        "<div>"+
+          "<div style=\"font-size:11px;font-weight:600;opacity:.72;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px\">Cronograma de Entregas</div>"+
+          "<div style=\"font-size:22px;font-weight:700;letter-spacing:-.02em;text-transform:capitalize\">"+nomeMes+"</div>"+
+          "<div style=\"font-size:12px;opacity:.82;margin-top:2px\">"+titulo+filtroInfo+" · Previsão de entrega / início de prestação do serviço</div>"+
+          "<div style=\"font-size:10px;opacity:.6;margin-top:2px\">"+hoje+" às "+hora+" · Base: "+nomeBase+"</div>"+
+        "</div>"+
+        "<div style=\"font-size:10px;opacity:.7;text-align:right\">GAQ — Gerência de Aquisições · DN</div>"+
+      "</div>"+
+      "<div style=\"display:grid;grid-template-columns:repeat(5,1fr);gap:10px\">"+
+        gKpi("Total no Mês", total, "#fff")+
+        gKpi("Vencidos", vencidos.length, vencidos.length > 0 ? "#fecaca" : "#fff")+
+        gKpi("≤ 7 dias", urgentes.length, urgentes.length > 0 ? "#fed7aa" : "#fff")+
+        gKpi("≤ 30 dias", proximos.length, "#fff")+
+        gKpi("Futuros (>30d)", futuros.length, "#fff")+
+      "</div>"+
+    "</div>"+
+
+    "<div style=\"display:flex;gap:16px;flex-wrap:wrap;margin-bottom:4px\">"+
+      "<div style=\"flex:1;min-width:200px\">"+C.h2("Por Área")+areaTable+"</div>"+
+      "<div style=\"flex:1;min-width:200px\">"+C.h2("Por Modalidade")+modTable+"</div>"+
+    "</div>"+
+
+    C.h2("Entregas previstas em "+nomeMes+" ("+total+")")+
+    (total === 0
+      ? "<p style=\"color:#888;font-size:12px;padding:14px;background:#fff;border-radius:8px;border:1px solid #dbe3ee\">Nenhum processo com entrega prevista neste mês.</p>"
+      : C.tbl(["Data","Situação","RC / Pré-compra","Área","Modalidade","Subárea","Status","Responsável","Objeto"], listaRows))+
+
+    "<div style=\"text-align:center;font-size:10px;color:#aaa;margin-top:20px;border-top:1px solid #e0e7ef;padding-top:10px\">Gerado pelo Painel GAQ · "+new Date().toLocaleString("pt-BR")+"</div>"+
+    "<script>setTimeout(function(){ window.print(); }, 400);<\/script></body></html>";
+}
+
+/* Relatório Customizado (aba admin): áreas múltiplas + janela de dias da RC +
+   indicadores selecionados + linha de datas de cada processo. Recebe dados já
+   computados pelo painel (kpis e entries prontos) — aqui só renderiza. */
+function gerarRelatorioCustom({ areasLabel, diasLabel, statusLabel, kpis, procs, meta }) {
+  var hoje = new Date().toLocaleDateString("pt-BR", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  var hora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  var nomeBase = meta ? meta.nomeArq : "—";
+  var PRINT = "-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact;";
+
+  function gKpi(label, value, color) {
+    return "<div style=\"background:#fff;border-radius:10px;padding:12px 10px;border-top:4px solid "+color+";text-align:center;flex:1;min-width:100px;box-shadow:0 2px 6px rgba(0,0,0,.07);"+PRINT+"\">"+
+      "<div style=\"font-size:22px;font-weight:800;color:"+color+"\">"+value+"</div>"+
+      "<div style=\"font-size:9px;color:#666;font-weight:700;text-transform:uppercase;margin-top:3px\">"+label+"</div></div>";
+  }
+  var kpiHtml = (kpis || []).map(function(k){ return gKpi(k.label, k.value, k.color); }).join("");
+
+  var procsHtml = (procs || []).map(function(p) {
+    var steps = (p.entries || []).map(function(e, i) {
+      var cor = e.isCPL ? "#8e44ad" : "#2e86c1";
+      var seta = i > 0
+        ? "<div style=\"display:inline-flex;flex-direction:column;align-items:center;justify-content:center;padding:0 5px;vertical-align:middle\">"+
+            "<span style=\"font-size:8px;font-weight:700;color:"+(e.du > 15 ? "#e67e22" : "#8a94a6")+"\">+"+e.du+" d.u.</span>"+
+            "<span style=\"color:#c3cedd;font-size:10px;line-height:1\">&#9472;&#9654;</span></div>"
+        : "";
+      return seta +
+        "<div style=\"display:inline-block;background:#f4f7fb;border:1px solid "+cor+"55;border-top:2px solid "+cor+";border-radius:7px;padding:4px 9px;margin:2px 0;vertical-align:middle;"+PRINT+"\">"+
+          "<div style=\"font-size:7.5px;font-weight:700;color:"+cor+";text-transform:uppercase;white-space:nowrap\">"+e.label+"</div>"+
+          "<div style=\"font-size:10.5px;font-weight:700;color:#1d2733;font-variant-numeric:tabular-nums\">"+e.data+"</div></div>";
+    }).join("");
+    var diasBadge = (p.diasRC === null || p.diasRC === undefined) ? "" :
+      "<span style=\"float:right;font-size:10px;font-weight:700;color:"+(p.diasRC > 90 ? "#c0392b" : p.diasRC > 50 ? "#e67e22" : "#8a94a6")+"\">"+p.diasRC+" d.u. desde a RC</span>";
+    function codChip(label, val, cor) {
+      if (!val) return "";
+      return "<span style=\"display:inline-block;background:"+cor+";color:#fff;border-radius:5px;padding:2px 8px;font-size:9px;font-weight:700;margin:1px 3px 1px 0;"+PRINT+"\">"+
+        "<span style=\"opacity:.75;font-weight:400\">"+label+":</span> "+val+"</span>";
+    }
+    var codigos = codChip("RC", p.rc, "#2e86c1") + codChip("Pré-compra", p.ticket, "#27ae60") +
+      codChip("Nº Processo", p.processo, "#8e44ad") + codChip("Pedido Suite", p.pedidoSuite, "#d35400");
+    var suiteHtml = "";
+    if (p.suite) {
+      var s = p.suite;
+      suiteHtml = "<div style=\"background:#16a08511;border:1px solid #16a08544;border-radius:7px;padding:4px 10px;margin-bottom:6px;font-size:9.5px;color:#333;"+PRINT+"\">"+
+        "<b style=\"color:#0e7a67;font-size:8.5px;text-transform:uppercase;letter-spacing:.04em\">Suite Sesc</b>"+
+        (s.id ? " &nbsp;<b style=\"color:#0e7a67\">"+s.id+"</b>" : "")+
+        (s.st ? " &nbsp;·&nbsp; Status: <b>"+s.st+"</b>" : "")+
+        (s.hab ? " &nbsp;·&nbsp; Habilitada em: <b>"+s.hab+"</b>" : "")+
+        (s.resp ? " &nbsp;·&nbsp; Resp.: <b>"+s.resp+"</b>" : "")+
+        "</div>";
+    }
+    return "<div style=\"background:#fff;border:1px solid #dbe3ee;border-radius:10px;padding:11px 14px;margin-bottom:10px;page-break-inside:avoid;"+PRINT+"\">"+
+      diasBadge+
+      "<div style=\"font-size:12px;margin-bottom:3px\"><b style=\"color:#1a5276\">"+(p.rc || p.ticket || "—")+"</b>"+
+        " <span style=\"background:#16a08522;color:#0e7a67;border-radius:999px;padding:1px 8px;font-size:9px;font-weight:700;"+PRINT+"\">"+(p.area || "—")+"</span>"+
+        " <span style=\"color:#8a94a6;font-size:10px\">"+(p.mod || "—")+"</span>"+
+        " <span style=\"color:#555;font-size:10px\">"+(p.status || "—")+"</span></div>"+
+      (codigos ? "<div style=\"margin-bottom:5px\">"+codigos+"</div>" : "")+
+      suiteHtml+
+      "<div style=\"font-size:10px;color:#555;margin-bottom:7px\">"+(p.resp ? "<b>"+p.resp+"</b> · " : "")+(p.objeto || "—")+"</div>"+
+      (steps ? "<div style=\"line-height:1.15\">"+steps+"</div>" : "<div style=\"font-size:10px;color:#999;font-style:italic\">Sem datas registradas.</div>")+
+      "</div>";
+  }).join("");
+
+  var css = "*{box-sizing:border-box;margin:0;padding:0}"+
+    "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f7;color:#1d1d1f;padding:20px}"+
+    "@media print{body{background:#fff;padding:8px}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}}";
+
+  return "<!DOCTYPE html><html lang=\"pt-BR\"><head><meta charset=\"UTF-8\"><title>Relatório Customizado — GAQ</title><style>"+css+"</style></head><body>"+
+    "<div style=\"background:linear-gradient(135deg,#0f2e2a 0%,#16a085 100%);color:#fff;border-radius:16px;padding:22px 26px;margin-bottom:16px;box-shadow:0 4px 16px rgba(15,46,42,.2);"+PRINT+"\">"+
+      "<div style=\"display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px\">"+
+        "<div>"+
+          "<div style=\"font-size:11px;font-weight:600;opacity:.72;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px\">Relatório Customizado</div>"+
+          "<div style=\"font-size:20px;font-weight:700;letter-spacing:-.02em\">"+areasLabel+"</div>"+
+          "<div style=\"font-size:11.5px;opacity:.85;margin-top:3px\">"+diasLabel+" · "+statusLabel+" · "+((procs || []).length)+" processo(s)</div>"+
+          "<div style=\"font-size:10px;opacity:.6;margin-top:2px\">"+hoje+" às "+hora+" · Base: "+nomeBase+"</div>"+
+        "</div>"+
+        "<div style=\"font-size:10px;opacity:.7;text-align:right\">GAQ — Gerência de Aquisições · DN</div>"+
+      "</div>"+
+    "</div>"+
+    (kpiHtml ? "<div style=\"display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px\">"+kpiHtml+"</div>" : "")+
+    "<h2 style=\"font-size:13px;color:#0e7a67;margin:14px 0 10px;border-left:4px solid #16a085;padding-left:9px;"+PRINT+"\">Processos e linha de datas</h2>"+
+    (procsHtml || "<p style=\"color:#888;font-size:12px;padding:14px;background:#fff;border-radius:8px;border:1px solid #dbe3ee\">Nenhum processo com os filtros selecionados.</p>")+
+    "<div style=\"text-align:center;font-size:10px;color:#aaa;margin-top:20px;border-top:1px solid #e0e7ef;padding-top:10px\">Gerado pelo Painel GAQ · "+new Date().toLocaleString("pt-BR")+"</div>"+
+    "<script>setTimeout(function(){ window.print(); }, 400);<\/script></body></html>";
 }
 
 function buildCronograma(proc, phaseIntervals) {
