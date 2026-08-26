@@ -114,11 +114,14 @@ var GESTAO_PASS = "418d23f2fb63e665c8c1c28c137a84b5494f88a3cd47cdc53a812b4f3a075
 var UPLOAD_PASS = "7b6fa9c245c88c2bc8fdc32e61612bad4744e34d6e53a1a03de0121260b38e0b";
 
 // ── Acesso por Área (chave = hash da senha; valor = código exato da área) ──
+// Valor pode ser uma área única ("GTI") ou várias separadas por vírgula
+// (ex: "GIN,ALMOXARIFADO") — o painel filtra pela união de todas elas.
 var AREA_PERFIS = {
   "6c34afc9823cc0d1ee46a66ad2f817ced10e017123c56481171c595ba446cea8": "GTI",
   "b2546ddd65f727b5fa864f309742082a569b3599e8e345fc18f5fe04295f36a1": "PLE",
   "7083cc7cde253eeadeed9d40e0c13fb09f3a3e3be6ab4bd460320f26f4849302": "ASCOM",
   "40cab534a65202df90df67d9285dd55d561f953ce972b2fa0ac6c2d08b257d93": "PSC",
+  "09576c8ab9368e3e46a70fb9e80c236a3130710f745c5a0e62b2d9285e869395": "GIN,ALMOXARIFADO",
 };
 
 // ── Diretoria — chave = hash da senha; valor = { nome, areasDestaque: [...] } ──

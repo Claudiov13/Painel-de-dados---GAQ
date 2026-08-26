@@ -2020,6 +2020,8 @@ function App() {
   const [loginArea, setLoginArea] = useState(() => {
     try { const a = sessionStorage.getItem("painel_login_area"); return (a && a !== "") ? a : null; } catch { return null; }
   });
+  // loginArea pode vir como "GIN,ALMOXARIFADO" (perfil de área multi-área) — versão pra exibir na UI
+  const loginAreaDisp = loginArea ? loginArea.split(",").join(" + ") : null;
   const [loginInput, setLoginInput] = useState("");
   const [loginErroMsg, setLoginErroMsg] = useState(false);
   const [loginTab, setLoginTab] = useState("gaq");
@@ -2260,6 +2262,7 @@ useEffect(() => {
   const [pgDrillDown, setPgDrillDown] = useState(1);
   const [pgDrillDownSz, setPgDrillDownSz] = useState(PAGE_SIZES[0] || 20);
   const [overviewInfoCard, setOverviewInfoCard] = useState("");
+  const [ocultarProblematicosOverview, setOcultarProblematicosOverview] = useState(false);
   const [showFunilInfo, setShowFunilInfo] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [watchVersion, setWatchVersion] = useState(0);
@@ -2669,8 +2672,7 @@ useEffect(() => {
       );
     }
     if (loginArea) {
-      const a = nrm(loginArea);
-      arr = arr.filter(r => nrm(r["Área Requisitante"] || r.Area || r["ÁREA"] || "").includes(a));
+      arr = arr.filter(r => areaMatch(r["Área Requisitante"] || r.Area || r["ÁREA"] || "", loginArea));
     }
     if (isDiretor && dirAreaSel) {
       const a = nrm(dirAreaSel);
@@ -2932,8 +2934,7 @@ useEffect(() => {
   // ── Dados históricos por ano para o perfil de Área ──────────────────────
   const areaAnoData = useMemo(() => {
     if (!loginArea) return [];
-    const a = nrm(loginArea);
-    const procs = base.filter(r => nrm(r["Área Requisitante"] || r.Area || r["ÁREA"] || "").includes(a));
+    const procs = base.filter(r => areaMatch(r["Área Requisitante"] || r.Area || r["ÁREA"] || "", loginArea));
     const byAno = {};
     procs.forEach(r => {
       const dt = r.aberturaSD || r.aberturaRC;
@@ -3451,6 +3452,37 @@ const topModLentas = (() => {
       count,
       rows: fBack.filter(r => (r.statusDet || r.status || "Sem status").toString().trim() === label),
     }));
+    // ── Total de processos por situação (base completa, não só "em andamento") ──
+    const situacaoConcluidos = fBase.filter(r => r.isConcluded);
+    const situacaoCancelados = fBase.filter(r => r.isCanceled);
+    const situacaoFracassados = fBase.filter(r => r.isFailed);
+    const situacaoSuspensos = fBase.filter(r => r.isSuspended);
+    const situacaoOutrosRows = fBase.filter(r => !r.emA && !r.isConcluded && !r.isCanceled && !r.isFailed && !r.isSuspended);
+    const totalPorSituacao = [
+      { key: "emA", label: "Em andamento", count: fBack.length, color: "var(--gaq-blue)", rows: fBack, problematico: false },
+      { key: "concluido", label: "Concluído", count: situacaoConcluidos.length, color: "var(--gaq-green)", rows: situacaoConcluidos, problematico: false },
+      { key: "suspenso", label: "Suspenso", count: situacaoSuspensos.length, color: "var(--gaq-purple)", rows: situacaoSuspensos, problematico: false },
+      { key: "cancelado", label: "Cancelado", count: situacaoCancelados.length, color: "var(--gaq-orange)", rows: situacaoCancelados, problematico: true },
+      { key: "fracassado", label: "Fracassado", count: situacaoFracassados.length, color: "var(--gaq-red)", rows: situacaoFracassados, problematico: true },
+      { key: "outros", label: "Outros/Sem status", count: situacaoOutrosRows.length, color: "var(--gaq-text-3)", rows: situacaoOutrosRows, problematico: false },
+    ].filter(item => item.count > 0);
+
+    // ── Total de processos por modalidade (base completa) ──
+    const totalPorModalidade = Object.entries(fBase.reduce((acc, r) => {
+      const key = r.Modalidade || "Não informado";
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(r);
+      return acc;
+    }, {}))
+      .map(([label, rows]) => ({
+        label,
+        count: rows.length,
+        rows,
+        countAtivo: rows.filter(r => !r.isCanceled && !r.isFailed).length,
+        rowsAtivo: rows.filter(r => !r.isCanceled && !r.isFailed),
+      }))
+      .sort((a, b) => b.count - a.count);
+
     const rowScopeKey = (r) => r ? (r.ProcessKey || `${r.NumRC || ""}|${r.TicketSD || ""}|${r.Objeto || ""}`) : "";
     const scopeKeys = new Set(fBase.map(rowScopeKey));
     const scopedBaseDiffFeed = isDiretor
@@ -3488,6 +3520,9 @@ const topModLentas = (() => {
       modalidades,
       areasAtivas,
       statusAtivos,
+      totalGeral: fBase.length,
+      totalPorSituacao,
+      totalPorModalidade,
       baseDiffFeed: scopedBaseDiffFeed,
       baseDiffInfo,
       mediaNCL,
@@ -4670,7 +4705,7 @@ PERGUNTA DO USUÁRIO: ${q}`;
           }}>{isDiretor ? "D" : loginArea ? "A" : isAdminMaster ? "M" : loginUser ? loginUser.charAt(0).toUpperCase() : "G"}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--gaq-text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {isDiretor ? loginDiretor.nome : loginArea ? `Área: ${loginArea}` : loginUser ? loginUser : "GAQ Admin"}
+              {isDiretor ? loginDiretor.nome : loginArea ? `Área: ${loginAreaDisp}` : loginUser ? loginUser : "GAQ Admin"}
             </div>
             <div style={{ fontSize: 11, color: "var(--gaq-text-3)" }}>
               {isDiretor ? "Diretoria" : loginArea ? "Perfil Área" : loginUser ? "Comprador" : "Administrador"}
@@ -4823,7 +4858,7 @@ PERGUNTA DO USUÁRIO: ${q}`;
                 <div style={{ display: "flex", flexDirection: "column", gap: 2, gridColumn: "span 2" }}>
                   <label style={{ fontSize: 10, color: "var(--gaq-text-3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: .4 }}>Area ativa</label>
                   <div style={{ padding: "5px 10px", borderRadius: 6, background: "rgba(175,82,222,0.08)", border: "1px solid rgba(175,82,222,0.2)", fontSize: 12, color: "var(--gaq-purple)", fontWeight: 700, height: 28, display: "flex", alignItems: "center", gap: 6 }}>
-                    Area: {loginArea} — filtro bloqueado nesta area
+                    Area: {loginAreaDisp} — filtro bloqueado nesta area
                   </div>
                 </div>
               )}
@@ -6178,12 +6213,83 @@ PERGUNTA DO USUÁRIO: ${q}`;
                     );
                   })}
                 </div>
+
+                <div className="gaq-card" style={{ padding: 22, marginBottom: 12 }}>
+                  <div className="gaq-section-h">
+                    <div>
+                      <div className="gaq-h3">Total de processos</div>
+                      <div className="sub">Todos os processos do recorte atual — por situação e por modalidade</div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--gaq-text-3)", cursor: "pointer" }}>
+                        <input type="checkbox" checked={ocultarProblematicosOverview}
+                          onChange={e => setOcultarProblematicosOverview(e.target.checked)} />
+                        Ocultar cancelados/fracassados
+                      </label>
+                      <span className="gaq-h2 gaq-num" style={{ fontSize: 22 }}>
+                        {(ocultarProblematicosOverview
+                          ? overviewAdmin.totalPorSituacao.filter(s => !s.problematico)
+                          : overviewAdmin.totalPorSituacao).reduce((s, i) => s + i.count, 0)}
+                      </span>
+                    </div>
+                  </div>
+                  {(() => {
+                    const rows = ocultarProblematicosOverview
+                      ? overviewAdmin.totalPorSituacao.filter(s => !s.problematico)
+                      : overviewAdmin.totalPorSituacao;
+                    if (!rows.length) return <div style={{ color: "var(--gaq-text-3)", fontSize: 12 }}>Sem dados no recorte atual.</div>;
+                    return (
+                      <Recharts.ResponsiveContainer width="100%" height={240}>
+                        <Recharts.BarChart data={rows} margin={{ top: 20, right: 10, left: 0, bottom: 5 }}>
+                          <Recharts.CartesianGrid vertical={false} stroke="var(--gaq-line)" />
+                          <Recharts.XAxis dataKey="label" fontSize={11} tick={{ fill: "var(--gaq-text-3)" }} axisLine={{ stroke: "var(--gaq-line)" }} tickLine={false} />
+                          <Recharts.YAxis fontSize={10} tick={{ fill: "var(--gaq-text-3)" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                          <Recharts.Tooltip formatter={(v) => [v, "Processos"]} labelStyle={{ color: "#1d1d1f" }} cursor={{ fill: "rgba(0,0,0,0.04)" }} />
+                          <Recharts.Bar dataKey="count" name="Processos" radius={[4, 4, 0, 0]} maxBarSize={64} isAnimationActive={false}>
+                            {rows.map(row => (
+                              <Recharts.Cell key={row.key} fill={row.color} style={{ cursor: "pointer" }}
+                                onClick={() => setDrillDown({ title: `Total de processos — ${row.label}`, data: row.rows, color: row.color })} />
+                            ))}
+                            <Recharts.LabelList dataKey="count" position="top" style={{ fontSize: 12, fontWeight: 600, fill: "var(--gaq-text)" }} />
+                          </Recharts.Bar>
+                        </Recharts.BarChart>
+                      </Recharts.ResponsiveContainer>
+                    );
+                  })()}
+
+                  <div style={{ fontWeight: 600, fontSize: 13, color: "var(--gaq-text)", margin: "18px 0 4px", paddingTop: 14, borderTop: "1px solid var(--gaq-line)" }}>
+                    Por modalidade
+                  </div>
+                  {(() => {
+                    const rows = overviewAdmin.totalPorModalidade
+                      .map(m => ocultarProblematicosOverview
+                        ? { label: m.label, count: m.countAtivo, rows: m.rowsAtivo }
+                        : { label: m.label, count: m.count, rows: m.rows })
+                      .filter(m => m.count > 0)
+                      .sort((a, b) => b.count - a.count);
+                    if (!rows.length) return <div style={{ color: "var(--gaq-text-3)", fontSize: 12 }}>Sem dados no recorte atual.</div>;
+                    return (
+                      <Recharts.ResponsiveContainer width="100%" height={240}>
+                        <Recharts.BarChart data={rows} margin={{ top: 20, right: 10, left: 0, bottom: 5 }}>
+                          <Recharts.CartesianGrid vertical={false} stroke="var(--gaq-line)" />
+                          <Recharts.XAxis dataKey="label" fontSize={11} tick={{ fill: "var(--gaq-text-3)" }} axisLine={{ stroke: "var(--gaq-line)" }} tickLine={false} />
+                          <Recharts.YAxis fontSize={10} tick={{ fill: "var(--gaq-text-3)" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                          <Recharts.Tooltip formatter={(v) => [v, "Processos"]} labelStyle={{ color: "#1d1d1f" }} cursor={{ fill: "rgba(0,0,0,0.04)" }} />
+                          <Recharts.Bar dataKey="count" name="Processos" fill="var(--gaq-blue)" radius={[4, 4, 0, 0]} maxBarSize={64} isAnimationActive={false}
+                            onClick={(_, i) => rows[i] && setDrillDown({ title: `Total de processos — ${rows[i].label}`, data: rows[i].rows, color: "var(--gaq-blue)" })}
+                            style={{ cursor: "pointer" }}>
+                            <Recharts.LabelList dataKey="count" position="top" style={{ fontSize: 12, fontWeight: 600, fill: "var(--gaq-text)" }} />
+                          </Recharts.Bar>
+                        </Recharts.BarChart>
+                      </Recharts.ResponsiveContainer>
+                    );
+                  })()}
+                </div>
               </div>
               </>}
               {/* ── Visão da Área (perfil área bloqueado) ── */}
               {loginArea && areaAnoData.length > 0 && (() => {
-                const aNorm = nrm(loginArea);
-                const areaAllProcs = base.filter(r => nrm(r["Área Requisitante"] || r.Area || r["ÁREA"] || "").includes(aNorm));
+                const areaAllProcs = base.filter(r => areaMatch(r["Área Requisitante"] || r.Area || r["ÁREA"] || "", loginArea));
                 const areaActiveRows = areaAllProcs.filter(r => r.emA);
                 const areaDoneRows = areaAllProcs.filter(r => !r.emA);
                 const totalAnd = areaActiveRows.length;
@@ -6209,8 +6315,8 @@ PERGUNTA DO USUÁRIO: ${q}`;
                           <path d="M3 21h18"/><path d="M5 21V8l7-4 7 4v13"/><path d="M9 21v-6h6v6"/><path d="M9 11h.01"/><path d="M15 11h.01"/>
                         </svg>
                         <div>
-                          <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: "-0.01em" }}>Área {loginArea} — Acompanhamento de Processos</div>
-                          <div style={{ fontSize: 10, opacity: .75, marginTop: 3 }}>Visualização restrita · Processos da área {loginArea} · Painel de Dados de Compras GAQ</div>
+                          <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: "-0.01em" }}>Área {loginAreaDisp} — Acompanhamento de Processos</div>
+                          <div style={{ fontSize: 10, opacity: .75, marginTop: 3 }}>Visualização restrita · Processos da área {loginAreaDisp} · Painel de Dados de Compras GAQ</div>
                         </div>
                       </div>
                       {tendencia && <div style={{ background: "rgba(255,255,255,0.15)", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 700 }}>{tendencia.txt}</div>}
@@ -6238,7 +6344,7 @@ PERGUNTA DO USUÁRIO: ${q}`;
                     <div style={{ background: "var(--card)", borderRadius: 10, padding: "16px 18px", boxShadow: "var(--shadow)" }}>
                       <div style={{ fontWeight: 700, fontSize: 13, color: "#8e44ad", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8e44ad" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="20" x2="21" y2="20"/><rect x="5" y="11" width="3.5" height="9"/><rect x="10.25" y="6" width="3.5" height="14"/><rect x="15.5" y="3" width="3.5" height="17"/></svg>
-                        Histórico de Processos por Ano — Área {loginArea}
+                        Histórico de Processos por Ano — Área {loginAreaDisp}
                       </div>
                       <div style={{ overflowX: "auto" }}>
                         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
@@ -7262,7 +7368,7 @@ PERGUNTA DO USUÁRIO: ${q}`;
               if (execData.topAreasProb.length > 0 && execData.topAreasProb[0][1] > 3) insights.push({ icon: "🏢", text: `Área "${execData.topAreasProb[0][0]}" lidera cancelamentos/fracassos com ${execData.topAreasProb[0][1]} ocorrências. Avaliar qualidade da especificação técnica e planejamento.`, color: "#8e44ad" });
               // Insight: Sobrecarga (apenas admin — nunca para acesso por área)
               if (!loginArea && execData.topSobrecarregados.length > 0 && execData.topSobrecarregados[0].criticos > 3) insights.push({ icon: "👤", text: `${execData.topSobrecarregados[0].name} possui ${execData.topSobrecarregados[0].criticos} processos críticos de ${execData.topSobrecarregados[0].total} em andamento. Avaliar redistribuição urgente.`, color: "#c0392b" });
-              if (loginArea && execData.topSobrecarregados.reduce((s,c) => s + c.criticos, 0) > 3) insights.push({ icon: "🔴", text: `${execData.topSobrecarregados.reduce((s,c) => s + c.criticos, 0)} processo(s) da área ${loginArea} estão em estado crítico (>50 d.u.). Acionar o GAQ para verificar prioridade.`, color: "#c0392b" });
+              if (loginArea && execData.topSobrecarregados.reduce((s,c) => s + c.criticos, 0) > 3) insights.push({ icon: "🔴", text: `${execData.topSobrecarregados.reduce((s,c) => s + c.criticos, 0)} processo(s) da área ${loginAreaDisp} estão em estado crítico (>50 d.u.). Acionar o GAQ para verificar prioridade.`, color: "#c0392b" });
               // Insight: Gargalo de cotação (fase entre propostas e aprovação)
               const procsCotacao = base.filter(r => r.emA && pd(r["Data inicial do envio de propostas"]) && !pd(r["Data final do envio de propostas"]));
               if (procsCotacao.length > 5) insights.push({ icon: "📋", text: `${procsCotacao.length} processos em andamento estão na fase de cotação (aguardando retorno de propostas). Esta etapa representa um gargalo significativo do fluxo — acompanhar prazos de resposta dos fornecedores.`, color: "#d35400" });
@@ -8469,7 +8575,7 @@ GAQ — Gerência de Aquisições`;
                 if (bigFase && bigFase.count > 5) opsInsights.push({ icon: "🔄", text: `Maior concentração na fase "${bigFase.label}" (${bigFase.area}) com ${bigFase.count} processos. Avaliar ações para destravar esta etapa.`, color: "#d35400" });
                 const topComp = compArr[0];
                 if (!loginArea && topComp && topComp.crit > 3) opsInsights.push({ icon: "👤", text: `${topComp.name} concentra ${topComp.crit} processos críticos. Priorizar redistribuição.`, color: "#c0392b" });
-                if (loginArea && opsCriticos.length > 0) opsInsights.push({ icon: "⚠️", text: `${opsCriticos.length} processo(s) da área ${loginArea} estão críticos pela combinação SLA + entrega. Verificar priorização junto ao GAQ.`, color: "#c0392b" });
+                if (loginArea && opsCriticos.length > 0) opsInsights.push({ icon: "⚠️", text: `${opsCriticos.length} processo(s) da área ${loginAreaDisp} estão críticos pela combinação SLA + entrega. Verificar priorização junto ao GAQ.`, color: "#c0392b" });
                 const paradosTotal = emAF.filter(r => r.diasParado > 15).length;
                 if (paradosTotal > 5) opsInsights.push({ icon: "⏸", text: `${paradosTotal} processos estagnados (>15 d.u. sem movimentação). Verificar pendências e destravar.`, color: "#e67e22" });
                 if (mediaAging > 50) opsInsights.push({ icon: "⏱", text: `Aging médio de ${mediaAging} d.u. está elevado. Meta recomendada: abaixo de 50 d.u.`, color: "#c0392b" });
@@ -8900,7 +9006,7 @@ GAQ — Gerência de Aquisições`;
           // perfil de Diretor com área selecionada idem. Admin/Comprador veem tudo.
           const areaFilter = loginArea || (isDiretor && dirAreaSel) || null;
           const baseScope = areaFilter
-            ? base.filter(r => nrm(r["Área Requisitante"] || r.Area || r["ÁREA"] || "").includes(nrm(areaFilter)))
+            ? base.filter(r => areaMatch(r["Área Requisitante"] || r.Area || r["ÁREA"] || "", areaFilter))
             : base;
           // Agrupar processos por tag (campo PROJETO / EVENTO / AÇÃO)
           const buckets = {};
@@ -9482,9 +9588,9 @@ GAQ — Gerência de Aquisições`;
               </>}
 
               {genTipoPerfil === "area" && <>
-                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--gaq-text-3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>Código da área (igual ao da coluna ÁREA no dados.js)</label>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--gaq-text-3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>Código da área (igual ao da coluna ÁREA no dados.js) — separe por vírgula para dar acesso a mais de uma área</label>
                 <input type="text" value={genArea} onChange={e => { setGenArea(e.target.value.toUpperCase()); setGenResultado(null); }}
-                  placeholder="Ex: GTI, PLE, ASCOM, PSC"
+                  placeholder="Ex: GTI  ou  GIN,ALMOXARIFADO"
                   style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--gaq-line)", background: "var(--input-bg)", color: "var(--gaq-text)", fontSize: 13, fontFamily: "var(--gaq-mono)", marginBottom: 16, boxSizing: "border-box" }} />
               </>}
 

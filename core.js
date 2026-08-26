@@ -4,6 +4,14 @@
 
 var nrm = s => s == null ? "" : s.toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim();
 
+// Perfil de area pode conter mais de uma area (ex: "GIN,ALMOXARIFADO"). areaMatch()
+// checa se o valor de area de uma linha bate com QUALQUER uma das areas do login.
+var areaLoginTokens = loginAreaRaw => (loginAreaRaw || "").toString().split(",").map(nrm).filter(Boolean);
+var areaMatch = (rowAreaRaw, loginAreaRaw) => {
+  const rowA = nrm(rowAreaRaw);
+  return areaLoginTokens(loginAreaRaw).some(tok => rowA.includes(tok));
+};
+
 function pd(v) {
   if (v == null || v === "") return null;
   if (v instanceof Date) return isNaN(v) ? null : v;
