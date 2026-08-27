@@ -9,7 +9,6 @@ logs/
 dados.js
 tags.js
 base_fracionamento.js
-apikey.js
 auth.backup.js
 _test_sha256.js
 **/dados.json

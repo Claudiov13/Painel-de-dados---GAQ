@@ -46,8 +46,6 @@
       });
     })();
   </script>
-  <script>window.IA_API_KEY = window.IA_API_KEY || "";</script>
-  <script src="./apikey.js" onerror="console.info('apikey.js não encontrado — IA Insights ficará desabilitada')"></script>
   <script>
 // Auto-reload de dados.js / tags.js com cache-bust (funciona em file:// e http://)
 window.__reloadPainelScripts = function(){
@@ -2298,12 +2296,6 @@ useEffect(() => {
   const [sortAll, setSortAll] = useState({ col: "diasTotais", dir: "desc" });
   const [hideSDConcluido, setHideSDConcluido] = useState(false);
 
-  // ── IA Insights (Gemini) — chave carregada via apikey.js (gitignored) ──
-  const iaDisponivel = !!(typeof window !== "undefined" && window.IA_API_KEY);
-  const [iaQuestion, setIaQuestion] = useState("");
-  const [iaLoading, setIaLoading] = useState(false);
-  const [iaConversa, setIaConversa] = useState([]); // [{ role: "user"|"ia", text }]
-  const [iaError, setIaError] = useState("");
 
   useEffect(() => { document.documentElement.setAttribute("data-theme", dark ? "dark" : "light"); }, [dark]);
 
@@ -4283,135 +4275,6 @@ const topModLentas = (() => {
   function crossFilter(key, val) { if (key === "resp") setFComp(val); if (key === "area") setFArea(val); if (key === "mod") setFMod(val); }
   function toggleSort(col) { setSortAll(prev => ({ col, dir: prev.col === col && prev.dir === "desc" ? "asc" : "desc" })); setPgAll(1); }
 
-  // ── IA Insights: monta contexto + chama Gemini ──
-  function buildIAContext() {
-    const ativos = baseVis.filter(r => r.emA);
-    const concl = baseVis.filter(r => r.isConcluded);
-    const canc = baseVis.filter(r => r.isCanceled);
-    const frac = baseVis.filter(r => r.isFailed);
-    const slaVencido = ativos.filter(r => r.atrasoGeral || r.atrasoSD);
-    const criticosRC = ativos.filter(r => (r.diasTotaisGestao||0) > 100);
-    const sdSemRC = ativos.filter(r => r.TicketSD && !r.NumRC);
-    const sdEncSemRC = sdSemRC.filter(r => r.encSD);
-
-    // Agrupar por área e modalidade
-    const porArea = {}; ativos.forEach(r => { const a = r["Área Requisitante"] || "N/I"; porArea[a] = (porArea[a]||0)+1; });
-    const porMod = {}; ativos.forEach(r => { const m = r.Modalidade || "N/I"; porMod[m] = (porMod[m]||0)+1; });
-    const topAreas = Object.entries(porArea).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([k,v])=>`${k}: ${v}`).join("; ");
-    const topMods = Object.entries(porMod).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([k,v])=>`${k}: ${v}`).join("; ");
-
-    // Top 30 processos críticos com info reduzida (para caber no contexto)
-    const isoDate = d => (d instanceof Date && !isNaN(d)) ? d.toISOString().slice(0,10) : null;
-    const topCriticos = ativos.slice().sort((a,b)=>(b.diasTotaisGestao||0)-(a.diasTotaisGestao||0)).slice(0,30).map(r => ({
-      rc: r.NumRC || "—",
-      sd: r.TicketSD || "—",
-      area: r["Área Requisitante"] || "—",
-      modalidade: r.Modalidade || "—",
-      status: r.statusDet || r.status || "—",
-      fase: r.faseAtual || "—",
-      respAtivo: r.respAtivo || "—",
-      diasRC: r.diasTotaisGestao || 0,
-      diasSD: r.diasSDAberto || r.diasSD || 0,
-      slaVencido: !!(r.atrasoGeral || r.atrasoSD),
-      dataAberturaRC: isoDate(r.aberturaRC),
-      dataAberturaSD: isoDate(r.aberturaSD),
-      objeto: (r.Objeto || "").slice(0, 200),
-    }));
-
-    // Top 30 mais recentes por abertura RC (para perguntas de recência)
-    const maisRecentes = ativos.filter(r => r.aberturaRC).slice()
-      .sort((a,b) => b.aberturaRC - a.aberturaRC).slice(0,30).map(r => ({
-        rc: r.NumRC || "—",
-        sd: r.TicketSD || "—",
-        area: r["Área Requisitante"] || "—",
-        modalidade: r.Modalidade || "—",
-        status: r.statusDet || r.status || "—",
-        respAtivo: r.respAtivo || "—",
-        dataAberturaRC: isoDate(r.aberturaRC),
-        dataAberturaSD: isoDate(r.aberturaSD),
-        diasRC: r.diasTotaisGestao || 0,
-        objeto: (r.Objeto || "").slice(0, 200),
-      }));
-
-    return {
-      meta: { totalBase: baseVis.length, totalAtivos: ativos.length, totalConcluidos: concl.length, totalCancelados: canc.length, totalFracassados: frac.length, slaVencido: slaVencido.length, criticosRC: criticosRC.length, sdSemRC: sdSemRC.length, sdEncSemRC: sdEncSemRC.length },
-      distribuicao: { topAreas, topMods },
-      topCriticos,
-      maisRecentes,
-    };
-  }
-
-  async function askIA() {
-    const q = (iaQuestion || "").trim();
-    if (!q || iaLoading) return;
-    if (!window.IA_API_KEY) { setIaError("Chave de IA não configurada (apikey.js)."); return; }
-
-    setIaError("");
-    setIaLoading(true);
-    setIaConversa(prev => [...prev, { role: "user", text: q }]);
-
-    const ctx = buildIAContext();
-    const systemInstr = `Você é um assistente analítico do Painel GAQ (Gerência de Aquisições do Sesc), focado em compras públicas. Responda em português, de forma direta, objetiva e estruturada (use marcadores quando útil). Baseie suas respostas APENAS nos dados fornecidos em CONTEXTO. Se a pergunta não puder ser respondida com os dados, diga isso claramente. Inclua números, percentuais e referências a RC/SD quando relevante.
-
-CONTEXTO DA BASE:
-- Total de processos visíveis: ${ctx.meta.totalBase}
-- Em andamento: ${ctx.meta.totalAtivos}
-- Concluídos: ${ctx.meta.totalConcluidos} · Cancelados: ${ctx.meta.totalCancelados} · Fracassados: ${ctx.meta.totalFracassados}
-- Com SLA vencido (atraso): ${ctx.meta.slaVencido}
-- RC com aging > 100 d.u.: ${ctx.meta.criticosRC}
-- Pré-compra (SD) sem RC: ${ctx.meta.sdSemRC} (sendo ${ctx.meta.sdEncSemRC} já encerrados aguardando a área abrir RC)
-
-DISTRIBUIÇÃO POR ÁREA (top): ${ctx.distribuicao.topAreas}
-DISTRIBUIÇÃO POR MODALIDADE (top): ${ctx.distribuicao.topMods}
-
-TOP 30 PROCESSOS CRÍTICOS (ordenados por aging RC desc):
-${JSON.stringify(ctx.topCriticos, null, 2)}
-
-TOP 30 PROCESSOS MAIS RECENTES (ordenados por dataAberturaRC desc — datas em formato YYYY-MM-DD):
-${JSON.stringify(ctx.maisRecentes, null, 2)}
-
-PERGUNTA DO USUÁRIO: ${q}`;
-
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(window.IA_API_KEY)}`;
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: systemInstr }] }],
-          generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: 2048,
-            thinkingConfig: { thinkingBudget: 0 },
-          },
-        }),
-      });
-      if (!resp.ok) {
-        const errTxt = await resp.text();
-        throw new Error(`HTTP ${resp.status}: ${errTxt.slice(0, 300)}`);
-      }
-      const data = await resp.json();
-      const finishReason = data.candidates?.[0]?.finishReason;
-      let text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      if (text && finishReason === "MAX_TOKENS") {
-        text += "\n\n_(resposta interrompida no limite de tokens — refaça a pergunta de forma mais específica para um retorno completo)_";
-      }
-      if (!text) {
-        if (finishReason === "SAFETY") text = "Resposta bloqueada por filtro de segurança da IA.";
-        else if (finishReason === "MAX_TOKENS") text = "A IA atingiu o limite de tokens antes de gerar texto. Faça uma pergunta mais específica.";
-        else if (data.promptFeedback?.blockReason) text = `Pergunta bloqueada: ${data.promptFeedback.blockReason}`;
-        else text = "Sem resposta.";
-      }
-      setIaConversa(prev => [...prev, { role: "ia", text }]);
-      setIaQuestion("");
-    } catch (e) {
-      setIaError("Falha ao consultar IA: " + (e.message || e));
-      setIaConversa(prev => [...prev, { role: "ia", text: "❌ Erro ao consultar IA. Verifique a chave em apikey.js e a conexão." }]);
-    } finally {
-      setIaLoading(false);
-    }
-  }
-
   const hasF = fAnoSD || fAnoRC || fMod || fArea || fSt || fStDet || fComp || fAval || fAnalista || fSubarea || fTag || fWatch;
   const activeFilters = useMemo(() => {
     const arr = [];
@@ -4483,7 +4346,6 @@ PERGUNTA DO USUÁRIO: ${q}`;
       ["alertaRC","shield","Alerta RC",alertRC.length],
       ["fracionamento","trend","Fracionamento (MXM)",null],
     ]},
-    ...(iaDisponivel ? [{ label: "Inteligência", items: [["iaInsights","spark","IA Insights",null]] }] : []),
   ] : [
     { label: "Visão", items: [
       ...(isAdminMaster ? [["qualidade","settings","Qualidade de Dados",qualityData ? qualityData.totalIssues : 0]] : []),
@@ -4491,7 +4353,6 @@ PERGUNTA DO USUÁRIO: ${q}`;
       ["executivo","spark","Executivo",null],
       ["operacional","chart","Operacional",null],
       ["fracionamento","trend","Fracionamento (MXM)",null],
-      ...(isAdminMaster && iaDisponivel ? [["iaInsights","spark","IA Insights",null]] : []),
     ]},
     { label: "Processos", items: [
       ["processos","list","Processos",fBase.length],
@@ -4524,7 +4385,7 @@ PERGUNTA DO USUÁRIO: ${q}`;
     alertas: "Alertas", alertaSD: "Alerta Pré-compra", alertaRC: "Alerta RC", mapeamento: "Mapeamento",
     gestao: "Performance", planejamento: "Planejamento", pantanal: "Pantanal", nova: "Nova Demanda",
     bal: "Balanceamento", dirHome: "Painel Diretoria", dirDiag: "Diagnóstico",
-    iaInsights: "IA Insights", geradorSenha: "Gerador de Senha", relCustom: "Relatório Customizado",
+    geradorSenha: "Gerador de Senha", relCustom: "Relatório Customizado",
     projetos: "Acompanhamento de Projetos",
     fracionamento: "Fracionamento (MXM)",
   };
@@ -9982,96 +9843,6 @@ GAQ — Gerência de Aquisições`;
             </div>
           </div>;
         })()}
-
-        {/* ════════════ ABA: IA INSIGHTS (Admin Master + Diretoria) ════════════ */}
-        {aba === "iaInsights" && (isAdminMaster || isDiretor) && <div>
-          {/* Header gradient (roxo/índigo — tema IA) */}
-          <div style={{ background: "linear-gradient(135deg, #1e1b4b 0%, #6366f1 100%)", color: "#fff", borderRadius: "var(--gaq-r-xl, 16px)", padding: "24px 28px", marginBottom: 18, boxShadow: "var(--gaq-shadow-2, 0 4px 16px rgba(30,27,75,.18))" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 600, opacity: .72, letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 4 }}>Inteligência Artificial · Google Gemini</div>
-                <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-.02em" }}>IA Insights</div>
-                <div style={{ fontSize: 12, opacity: .82, marginTop: 2 }}>Pergunte sobre processos, áreas, modalidades ou peça análises e recomendações com base na sua carteira.</div>
-                <div style={{ fontSize: 10, opacity: .6, marginTop: 4 }}>Modelo: gemini-2.5-flash · Contexto: {baseVis.length} processos da base acessível</div>
-              </div>
-              <div style={{ background: "rgba(255,255,255,.16)", borderRadius: 10, padding: "6px 12px", fontSize: 11, fontWeight: 700, border: "1px solid rgba(255,255,255,.28)" }}>{iaDisponivel ? "✓ IA conectada" : "✗ Chave não configurada"}</div>
-            </div>
-          </div>
-
-          {!iaDisponivel && (
-            <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 10, padding: "12px 16px", marginBottom: 14, fontSize: 12, color: "#991b1b" }}>
-              <b>IA desabilitada.</b> O arquivo <code>apikey.js</code> não foi encontrado na pasta do projeto. Solicite o arquivo a quem mantém o painel.
-            </div>
-          )}
-
-          {/* Sugestões rápidas */}
-          {iaDisponivel && iaConversa.length === 0 && (
-            <div style={{ background: "var(--card)", borderRadius: 12, padding: "16px 18px", marginBottom: 14, border: "1px solid var(--border2)", boxShadow: "var(--shadow)" }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 10 }}>Sugestões para começar</div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8 }}>
-                {[
-                  "Quais áreas têm mais processos com SLA vencido?",
-                  "Resuma os 5 processos mais críticos e o que está travando cada um.",
-                  "Existe concentração de risco em alguma modalidade? Por quê?",
-                  "Que recomendações você daria para reduzir o aging médio?",
-                  "Quais processos de pré-compra (SD) precisam de cobrança imediata?",
-                  "Compare a saúde da carteira por área requisitante.",
-                ].map(s => (
-                  <button key={s} onClick={() => setIaQuestion(s)}
-                    style={{ textAlign: "left", padding: "10px 14px", background: "var(--card2)", border: "1px solid var(--border2)", borderRadius: 10, cursor: "pointer", fontSize: 12, color: "var(--text)", lineHeight: 1.4 }}>
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Conversa */}
-          {iaConversa.length > 0 && (
-            <div style={{ background: "var(--card)", borderRadius: 12, padding: "16px 18px", marginBottom: 14, border: "1px solid var(--border2)", boxShadow: "var(--shadow)" }}>
-              {iaConversa.map((m, i) => (
-                <div key={i} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: i < iaConversa.length - 1 ? "1px solid var(--border2)" : "none" }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: m.role === "user" ? "#6366f1" : "#16a34a", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6 }}>
-                    {m.role === "user" ? "Você" : "IA Gemini"}
-                  </div>
-                  <div style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{m.text}</div>
-                </div>
-              ))}
-              {iaLoading && <div style={{ fontSize: 11, color: "var(--text3)", fontStyle: "italic" }}>IA pensando…</div>}
-            </div>
-          )}
-
-          {iaError && (
-            <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "8px 12px", marginBottom: 10, fontSize: 11, color: "#991b1b" }}>{iaError}</div>
-          )}
-
-          {/* Input */}
-          {iaDisponivel && (
-            <div style={{ background: "var(--card)", borderRadius: 12, padding: "12px 14px", border: "1px solid var(--border2)", boxShadow: "var(--shadow)", display: "flex", gap: 8, alignItems: "flex-end" }}>
-              <textarea value={iaQuestion} onChange={e => setIaQuestion(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); askIA(); } }}
-                placeholder="Pergunte algo sobre os processos da base… (Ctrl+Enter para enviar)"
-                rows={3}
-                style={{ flex: 1, padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border2)", background: "var(--card2)", color: "var(--text)", fontSize: 13, resize: "vertical", fontFamily: "inherit" }} />
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <button onClick={askIA} disabled={iaLoading || !iaQuestion.trim()}
-                  style={{ background: iaLoading || !iaQuestion.trim() ? "#9ca3af" : "linear-gradient(135deg, #1e1b4b, #6366f1)", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", cursor: iaLoading || !iaQuestion.trim() ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
-                  {iaLoading ? "Enviando…" : "Enviar"}
-                </button>
-                {iaConversa.length > 0 && (
-                  <button onClick={() => { setIaConversa([]); setIaError(""); }}
-                    style={{ background: "transparent", color: "var(--text3)", border: "1px solid var(--border2)", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 11 }}>
-                    Limpar
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 10, textAlign: "center" }}>
-            ⚠ As respostas da IA são geradas a partir dos dados visíveis e podem conter erros. Sempre valide informações críticas.
-          </div>
-        </div>}
 
         {/* ════════════ ABA: ALERTA PRÉ-COMPRA ════════════ */}
         {aba === "alertaSD" && <div>

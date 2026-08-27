@@ -14,7 +14,6 @@ Sistema de compras/
 ├── config.js                   Constantes e colunas do timeline
 ├── reports.js                  Relatorios PDF/Excel
 ├── auth.js                     Perfis e senhas (hash)
-├── apikey.js                   Chave da IA (nao versionado)
 ├── dados.js                    Base principal (gerado, nao versionado)
 ├── tags.js                     Tags dos processos (gerado, nao versionado)
 ├── base_fracionamento.js       Base MXM (gerado, nao versionado)
@@ -80,7 +79,6 @@ Os ficheiros de dados reais nao sao versionados aqui:
 - `tags.js`
 - `base_fracionamento.js`
 - `chamados_servicedesk.js` / `.json`
-- `apikey.js`
 
 Para executar localmente, mantenha esses ficheiros fora do Git e apenas no
 ambiente interno autorizado.
