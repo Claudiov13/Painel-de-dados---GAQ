@@ -1,7 +1,7 @@
 # Painel de dados - GAQ
 
 Solucao local do painel de acompanhamento da GAQ. O painel e um `index.html`
-estatico (React via Babel standalone) que carrega os dados de arquivos `.js`
+estatico (React compilado para producao) que carrega os dados de arquivos `.js`
 gerados a partir das planilhas do OneDrive (KB_GAQ).
 
 ## Estrutura de pastas
@@ -34,6 +34,82 @@ Sistema de compras/
 
 Abra o `index.html` diretamente no navegador (file:// ou SharePoint/OneDrive).
 Nao ha servidor: os dados sao carregados dos arquivos `.js` na mesma pasta.
+
+### Versao 6.1: distribuicao e manutencao
+
+Os usuarios continuam abrindo o mesmo `index.html` na pasta local sincronizada
+pelo OneDrive, com os mesmos perfis e senhas de `auth.js`. Aguarde a sincronizacao
+completa antes de recarregar. A pasta `assets/` e obrigatoria. Nao e necessario
+instalar Node nem manter acesso a uma CDN nas maquinas dos usuarios.
+
+O uso diretamente no site do SharePoint depende das politicas de execucao de
+HTML/JavaScript da organizacao; a verificacao desta versao foi feita por `file://`.
+
+Codigo-fonte: `src/App.jsx`, `src/screens/` (24 telas), `src/components.jsx`,
+`src/domain/service-desk.js`, `src/data-repository.js` e `src/access-log.js`.
+As regras gerais continuam em `core.js`, a configuracao em `config.js` e as
+exportacoes em `reports.js`. `index.html` e `assets/` sao saidas geradas.
+
+Depois de editar codigo ou estilos, execute:
+
+```powershell
+.\geradores\compilar_painel.ps1
+```
+
+A compilacao requer Node 22.19+ apenas na maquina de manutencao. As dependencias
+ficam em `%LOCALAPPDATA%\PainelGAQ\build`, fora da pasta compartilhada.
+O build mantem as versoes das bibliotecas existentes e usa React de producao.
+O primeiro preparo das ferramentas requer internet; o painel publicado funciona
+com as bibliotecas locais. Nao edite os arquivos de `assets/` manualmente.
+
+Depois de substituir manualmente qualquer base, execute:
+
+```powershell
+.\geradores\publicar_dados.ps1
+```
+
+Os geradores de Excel e MXM ja chamam essa publicacao. O publicador valida as
+quatro bases, grava os arquivos por substituicao local e publica `publicacao.js`
+por ultimo. Nao cria backups JSON permanentes. Mantenha uma unica maquina como
+publicadora; o bloqueio de execucao e local, nao um bloqueio distribuido do OneDrive.
+O manifesto identifica uma combinacao de arquivos, nao transforma fontes com
+horarios distintos em uma transacao dos sistemas de origem.
+
+O navegador confere as versoes antes de aplicar os dados. Durante uma sincronizacao
+incompleta, mantem o conjunto anterior em memoria e informa a falha. Na primeira
+abertura, e necessario concluir a sincronizacao para carregar o conjunto inteiro.
+Sem alteracoes, a verificacao automatica le somente o manifesto; abas ocultas
+pausam as verificacoes. Na virada do dia, os prazos sao recalculados.
+
+Datas: "Base gerada" corresponde ao horario registrado pelo gerador, e
+"Verificada" corresponde a leitura pelo navegador. Arquivos antigos sem metadados
+mostram "Geracao nao informada". Importar uma planilha manualmente pausa a
+sincronizacao automatica para nao substituir a importacao silenciosamente.
+
+### Acessos (etapa 6)
+
+O botao administrativo "Acessos locais" mostra entradas e saidas registradas
+somente naquele navegador, permite exportar CSV e limita o historico a 500 eventos
+dos ultimos 90 dias. O aviso aparece na tela de login. Nao registra senha, hash,
+IP, conteudo de processos ou historico de navegacao. Se o armazenamento local
+estiver bloqueado, o acesso ao painel continua funcionando.
+
+Esse historico nao e uma auditoria central, pode ser apagado pelo usuario e nao
+identifica individualmente pessoas que compartilham a mesma senha. Para consolidar
+quem acessou e quando em todos os computadores, falta um receptor corporativo
+autorizado e identidade individual (por exemplo, integracao autenticada com
+SharePoint/Power Automate). Nenhum envio de telemetria foi ativado.
+
+O Microsoft 365 registra atividades de arquivos e sincronizacao no Purview, mas
+esses eventos nao equivalem a cada abertura do painel ja sincronizado no computador:
+[atividades de auditoria Microsoft 365](https://learn.microsoft.com/en-us/purview/audit-log-activities).
+
+### Verificacao tecnica
+
+`npm test` executa testes de leitura coordenada, falhas, publicacao e registros
+locais. `scripts/verify-browser.mjs` e `scripts/verify-profiles.mjs` usam uma sessao
+descartavel do agent-browser; nao devem ser executados na sessao pessoal de um usuario.
+Os perfis de teste sao adicionados apenas a memoria dessa aba, sem alterar `auth.js`.
 
 ## Atualizacao da base
 

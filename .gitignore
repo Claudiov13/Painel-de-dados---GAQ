@@ -15,6 +15,7 @@ _test_sha256.js
 **/tags.json
 chamados_servicedesk*.json
 chamados_servicedesk.js
+publicacao.js
 
 # Backups e pacotes locais
 Versões anteriores/
@@ -33,3 +34,6 @@ tmp-server-*.log
 
 # Ficheiros do Windows
 desktop.ini
+
+# Artefatos gerados para auditoria e documentacao — nao fazem parte do sistema
+/documentacao_tecnica/

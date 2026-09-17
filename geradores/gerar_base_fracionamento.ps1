@@ -18,6 +18,7 @@
 # =============================================================================
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'publicacao_lib.ps1')
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 $EXCEL_FILE_NAME = "Base de fracionamento MXM.xlsx"
@@ -188,7 +189,8 @@ try {
 
     $content = "window.__FRACIONAMENTO__ = $json;`n"
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($OUTPUT_PATH, $content, $utf8NoBom)
+    Write-PainelSource -Path $OUTPUT_PATH -GlobalName '__FRACIONAMENTO__' -Key 'fracionamento' -Json $json
+    & (Join-Path $PSScriptRoot 'publicar_dados.ps1') -Root (Split-Path -Parent $OUTPUT_PATH)
 
     Write-Host ("OK: base_fracionamento.js gerado com {0} itens (DL1={1}, DL2={2})." -f $itens.Count, $dl1.Count, $dl2.Count)
 }

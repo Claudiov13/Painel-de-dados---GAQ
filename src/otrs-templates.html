@@ -1,30 +1,4 @@
-<!doctype html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Painel de Dados de Compras GAQ</title>
-  <link rel="stylesheet" href="./styles.css?v=f1cc9d0a3abc"/>
-  <script>
-    window.addEventListener('error', function (event) {
-      var box = document.getElementById('boot-status');
-      if (box) { box.hidden = false; box.textContent = 'Não foi possível abrir o painel. Aguarde o OneDrive concluir a sincronização e recarregue. ' + (event.message || ''); }
-    });
-    window.addEventListener('unhandledrejection', function () {
-      var box = document.getElementById('boot-status');
-      if (box) { box.hidden = false; box.textContent = 'Ocorreu uma falha. Recarregue o painel após conferir a sincronização do OneDrive.'; }
-    });
-  </script>
-  <script defer src="./assets/vendor.js?v=f1cc9d0a3abc"></script>
-  <script defer src="./auth.js?v=f1cc9d0a3abc"></script>
-  <script defer src="./assets/runtime.js?v=f1cc9d0a3abc"></script>
-  <script defer src="./assets/app.js?v=f1cc9d0a3abc"></script>
-</head>
-<body>
-  <div id="boot-status" hidden role="alert" class="gaq-data-notice"></div>
-  <div id="root"><div role="status" class="gaq-data-notice">Abrindo o Painel GAQ…</div></div>
-  <noscript>Ative o JavaScript no navegador para abrir o painel.</noscript>
-  <!-- ═══════════════════════════════════════════════════════════════
+<!-- ═══════════════════════════════════════════════════════════════
      TEMPLATES DOS SCRIPTS DE EXTRAÇÃO OTRS
      Usados por gerarScriptExtratorOTRS() — NÃO são executados.
      Conteúdo raw: backticks e ${} são preservados literalmente.
@@ -266,7 +240,6 @@
   return resultado;
 })();
 </script>
-
 <script type="text/template" id="otrs-tpl-diurno">
 (async function extrairChamados() {
 
@@ -537,14 +510,3 @@
 })();
 </script>
 
-
-  <script>
-    setTimeout(function () {
-      if (!window.React || !window.PainelRepository || !document.querySelector('#root button')) {
-        var box = document.getElementById('boot-status'); box.hidden = false;
-        box.textContent = 'A abertura ainda não foi concluída. Confira se a pasta assets foi sincronizada e recarregue o painel.';
-      }
-    }, 15000);
-  </script>
-</body>
-</html>

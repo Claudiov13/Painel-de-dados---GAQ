@@ -56,6 +56,7 @@ if ($foundExcelPath) { $EXCEL_PATH = $foundExcelPath }
 $PROJECT_ROOT = Split-Path -Parent $PSScriptRoot
 $OUTPUT_PATH  = Join-Path $PROJECT_ROOT "dados.js"
 $LOG_PATH     = Join-Path $PSScriptRoot "gerar_dados_js.log"
+. (Join-Path $PSScriptRoot 'publicacao_lib.ps1')
 
 # ── LOG ───────────────────────────────────────────────────────────────────────
 
@@ -329,7 +330,8 @@ try {
 
     # Escreve UTF-8 sem BOM (compativel com <script src="./dados.js">)
     $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-    [System.IO.File]::WriteAllText($OUTPUT_PATH, $content, $utf8NoBom)
+    Write-PainelSource -Path $OUTPUT_PATH -GlobalName '__PAINEL_DADOS__' -Key 'dados' -Json $json
+    & (Join-Path $PSScriptRoot 'publicar_dados.ps1') -Root $PROJECT_ROOT
 
     Write-Log "dados.js gerado: $($records.Count) registros"
     Write-Log "Caminho: $OUTPUT_PATH"
@@ -362,7 +364,8 @@ try {
 
         $content = "window.__PAINEL_DADOS__ = $json;`n"
         $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-        [System.IO.File]::WriteAllText($OUTPUT_PATH, $content, $utf8NoBom)
+        Write-PainelSource -Path $OUTPUT_PATH -GlobalName '__PAINEL_DADOS__' -Key 'dados' -Json $json
+        & (Join-Path $PSScriptRoot 'publicar_dados.ps1') -Root $PROJECT_ROOT
 
         Write-Log "dados.js gerado: $($records.Count) registros"
         Write-Log "Caminho: $OUTPUT_PATH"
